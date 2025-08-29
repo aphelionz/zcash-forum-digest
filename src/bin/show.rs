@@ -10,7 +10,7 @@ async fn main() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("latest") => {
-            let n: i64 = args.next().as_deref().unwrap_or("10").parse().unwrap_or(10);
+            let n = parse_n(args.next(), 10)?;
             latest(&pool, n).await?;
         }
         Some("id") => {
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
         }
         Some("search") => {
             let q = args.next().ok_or_else(|| anyhow!("missing <query>"))?;
-            let n: i64 = args.next().as_deref().unwrap_or("20").parse().unwrap_or(20);
+            let n = parse_n(args.next(), 20)?;
             search(&pool, &q, n).await?;
         }
         _ => {
@@ -37,7 +37,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn latest(pool: &PgPool, n: i64) -> Result<()> {
+fn parse_n(arg: Option<String>, default: u32) -> Result<u32> {
+    let n = match arg {
+        Some(s) => s
+            .parse::<u32>()
+            .map_err(|_| anyhow!("N must be a positive integer"))?,
+        None => default,
+    };
+    if n == 0 {
+        Err(anyhow!("N must be greater than zero"))
+    } else {
+        Ok(n)
+    }
+}
+
+async fn latest(pool: &PgPool, n: u32) -> Result<()> {
     // Prefer LLM, else heuristic; order by most recently updated among the two.
     let rows = sqlx::query(
         r#"
@@ -55,7 +69,7 @@ async fn latest(pool: &PgPool, n: i64) -> Result<()> {
         LIMIT $1
         "#,
     )
-    .bind(n)
+    .bind(i64::from(n))
     .fetch_all(pool)
     .await?;
 
@@ -92,7 +106,7 @@ async fn by_id(pool: &PgPool, id: i64) -> Result<()> {
     Ok(())
 }
 
-async fn search(pool: &PgPool, q: &str, n: i64) -> Result<()> {
+async fn search(pool: &PgPool, q: &str, n: u32) -> Result<()> {
     // Search title + both summary sources; prefer LLM text in results.
     let rows = sqlx::query(
         r#"
@@ -113,7 +127,7 @@ async fn search(pool: &PgPool, q: &str, n: i64) -> Result<()> {
         "#
     )
     .bind(q)
-    .bind(n)
+    .bind(i64::from(n))
     .fetch_all(pool)
     .await?;
 

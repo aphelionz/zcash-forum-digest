@@ -44,7 +44,7 @@ clippy:
 lint: fmt-check clippy
 
 test:
-	cargo nextest run --all-features
+	OLLAMA_MAX_ELAPSED_SECS=1 cargo nextest run --all-features
 
 watch:
 	cargo watch -x "nextest run --all-features"
