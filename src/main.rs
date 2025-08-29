@@ -2,11 +2,11 @@ use anyhow::{Result, anyhow};
 use backoff::{ExponentialBackoff, future::retry};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row, query, query_scalar};
+use sqlx::{PgPool, Row, query};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
-use zc_forum_etl::{BPE, make_chunk, prompt_hash, strip_tags_fast};
+use zc_forum_etl::{BPE, make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast};
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
@@ -198,31 +198,6 @@ async fn fetch_topic(client: &Client, id: u64) -> Result<TopicFull> {
         .error_for_status()?
         .json::<TopicFull>()
         .await?)
-}
-
-/* ---------------- Incremental guard ---------------- */
-
-async fn posts_changed_since_last_llm(pool: &PgPool, topic_id: i64) -> Result<bool> {
-    // latest post time we have
-    let max_created: Option<OffsetDateTime> =
-        query_scalar(r#"SELECT MAX(created_at) FROM posts WHERE topic_id = $1"#)
-            .bind(topic_id)
-            .fetch_one(pool)
-            .await?;
-
-    // last time we summarized with LLM
-    let last_llm: Option<OffsetDateTime> = query_scalar::<_, OffsetDateTime>(
-        r#"SELECT updated_at FROM topic_summaries_llm WHERE topic_id = $1"#,
-    )
-    .bind(topic_id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(match (max_created, last_llm) {
-        (None, _) => false,
-        (Some(_), None) => true,
-        (Some(mc), Some(ts)) => mc > ts,
-    })
 }
 
 /* ---------------- Text prep ---------------- */

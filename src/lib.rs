@@ -1,7 +1,10 @@
+use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use sqlx::{PgPool, query_scalar};
 use tiktoken_rs::{CoreBPE, cl100k_base};
+use time::OffsetDateTime;
 
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 pub static BPE: Lazy<CoreBPE> =
@@ -70,6 +73,27 @@ pub fn prompt_hash(topic_id: i64, model: &str, prompt: &str) -> String {
     h.update(b"\n");
     h.update(prompt.as_bytes());
     format!("{:x}", h.finalize())
+}
+
+pub async fn posts_changed_since_last_llm(pool: &PgPool, topic_id: i64) -> Result<bool> {
+    let max_created: Option<OffsetDateTime> =
+        query_scalar(r#"SELECT MAX(created_at) FROM posts WHERE topic_id = $1"#)
+            .bind(topic_id)
+            .fetch_one(pool)
+            .await?;
+
+    let last_llm: Option<OffsetDateTime> =
+        query_scalar(r#"SELECT updated_at FROM topic_summaries_llm WHERE topic_id = $1"#)
+            .bind(topic_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
+
+    Ok(match (max_created, last_llm) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(mc), Some(ts)) => mc > ts,
+    })
 }
 
 #[cfg(test)]
