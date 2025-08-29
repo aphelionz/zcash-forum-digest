@@ -87,8 +87,11 @@ pub async fn summarize_with_ollama(
                 .await
                 .map_err(|e| backoff::Error::transient(anyhow!("transport: {e:?}")))?;
 
-            if !resp.status().is_success() {
-                let status = resp.status();
+            let status = resp.status();
+            if status.is_client_error() {
+                let text = resp.text().await.unwrap_or_default();
+                return Err(backoff::Error::permanent(anyhow!("http {status}: {text}")));
+            } else if !status.is_success() {
                 let text = resp.text().await.unwrap_or_default();
                 return Err(backoff::Error::transient(anyhow!("http {status}: {text}")));
             }

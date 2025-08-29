@@ -19,3 +19,6 @@ backoff = { version = "0.4", features = ["tokio"] }
 sha2 = "0.10"
 tiktoken-rs = "0.7"
 futures = "0.3"
+
+[dev-dependencies]
+wiremock = "0.6.5"
