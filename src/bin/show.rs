@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use std::env;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -137,7 +138,29 @@ fn print_card(row: &sqlx::postgres::PgRow) -> Result<()> {
         .unwrap_or_else(|| "unknown-time".to_string());
 
     println!("[{}] {}  ({source} • {when})", id, title);
-    println!("{}", summary.trim());
+
+    if let Ok(parsed) = serde_json::from_str::<LlmSummary>(&summary) {
+        println!("{}", parsed.headline.trim());
+        for (i, bullet) in parsed.bullets.iter().enumerate() {
+            match parsed.citations.get(i) {
+                Some(c) if !c.trim().is_empty() => {
+                    println!(" - {} {}", bullet.trim(), c.trim());
+                }
+                _ => println!(" - {}", bullet.trim()),
+            }
+        }
+    } else {
+        println!("{}", summary.trim());
+    }
+
     println!("---");
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct LlmSummary {
+    headline: String,
+    bullets: Vec<String>,
+    #[serde(default)]
+    citations: Vec<String>,
 }
