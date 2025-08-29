@@ -26,4 +26,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-features --lib -- -D warnings
       - name: Tests
-        run: just test
+        run: cargo nextest run --all-features
+        env:
+          RUST_BACKTRACE: full
+          CARGO_TERM_COLOR: always
+          OLLAMA_MAX_ELAPSED_SECS: 1
