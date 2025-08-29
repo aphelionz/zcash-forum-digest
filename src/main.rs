@@ -251,6 +251,7 @@ async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/* Formatting instructions are in Modelfile */
 fn build_prompt(topic_title: &str, chunk: &str) -> String {
     format!(
         "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---",
