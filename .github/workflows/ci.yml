@@ -15,6 +15,9 @@ jobs:
         with:
           toolchain: 1.89
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Install cargo-nextest
         run: cargo install cargo-nextest
       - name: Format
