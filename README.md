@@ -30,7 +30,7 @@ for quick review.
 ### Steps
 ```sh
 # Clone repository
-$ git clone https://github.com/.../zcash-forum-digest
+$ git clone https://github.com/aphelionz/zcash-forum-digest
 $ cd zcash-forum-digest
 
 # Enter Nix dev shell (optional but recommended)
@@ -43,7 +43,7 @@ $ just db-create
 ## Usage
 Run the ETL and summarization pipeline:
 ```sh
-$ cargo run
+$ cargo run --bin zc-forum-etl
 ```
 
 ### CLI
