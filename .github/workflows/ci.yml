@@ -26,4 +26,4 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-features --lib -- -D warnings
       - name: Tests
-        run: cargo nextest run --all-features --lib
+        run: just test
