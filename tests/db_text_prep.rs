@@ -1,12 +1,11 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use sqlx::{query, PgPool};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use sqlx::{PgPool, query};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zc_forum_etl::{load_plain_lines, make_chunk};
 
-static LINE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\[post:\d+ @ [^\]]+\] .+").unwrap());
+static LINE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\[post:\d+ @ [^\]]+\] .+").unwrap());
 
 #[sqlx::test(migrations = "./migrations")]
 async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
