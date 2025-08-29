@@ -72,7 +72,8 @@ async fn main() -> Result<()> {
         std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| OLLAMA_DEFAULT_BASE.to_string());
 
     // Warm up the model once (ignore the result).
-    let _ = summarize_with_ollama(&client, &ollama_base, &model, "warmup").await;
+    let warm_prompt = build_prompt("warmup", "warmup");
+    let _ = summarize_with_ollama(&client, &ollama_base, &model, &warm_prompt).await;
 
     // Fetch latest list of topics
     let latest: Latest = fetch_latest(&client).await?;
@@ -149,6 +150,7 @@ async fn main() -> Result<()> {
                 warn!("LLM summarize failed for {}: {e}", topic.id);
             }
             Ok(Ok((summary, in_tok, out_tok))) => {
+                let summary_json = serde_json::to_string(&summary)?;
                 query!(
                     r#"
                     INSERT INTO topic_summaries_llm (topic_id, summary, model, prompt_hash, input_tokens, output_tokens, cost_usd)
@@ -161,7 +163,7 @@ async fn main() -> Result<()> {
                       output_tokens = EXCLUDED.output_tokens,
                       updated_at = now()
                     "#,
-                    topic.id as i64, summary, model, phash, in_tok as i32, out_tok as i32
+                    topic.id as i64, summary_json, model, phash, in_tok as i32, out_tok as i32
                 ).execute(&pool).await?;
 
                 info!(
@@ -312,10 +314,13 @@ fn take_prefix_chars(s: &str, max: usize) -> String {
 fn build_prompt(topic_title: &str, chunk: &str) -> String {
     format!(
         "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---\n\n\
-         Summarize for a technical audience:\n\
-         - One-line headline (<=15 words)\n\
+         Summarize for a technical audience. Respond ONLY with strict JSON:\n\
+         {{\"headline\": string, \"bullets\": [strings], \"citations\": [strings]}}\n\
+         Rules:\n\
+         - Headline ≤15 words\n\
          - 3–6 concise bullets with concrete facts, dates, statuses, decisions\n\
-         - If off-topic/banter, say: 'Meta: off-topic'\n\
+         - Citations reference [post:<id>] lines from the excerpt\n\
+         - If off-topic/banter, set headline to 'Meta: off-topic' and bullets/citations to []\n\
          - No speculation. No marketing fluff.",
         title = topic_title,
         body = chunk
@@ -324,13 +329,13 @@ fn build_prompt(topic_title: &str, chunk: &str) -> String {
 
 /* ---------------- Ollama client (/api/chat) ---------------- */
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Msg<'a> {
     role: &'a str,
     content: &'a str,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct ChatReq<'a> {
     model: &'a str,
     stream: bool,
@@ -341,7 +346,7 @@ struct ChatReq<'a> {
     options: Option<OllamaOpts>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct OllamaOpts {
     temperature: f32,
     num_ctx: usize,
@@ -358,12 +363,19 @@ struct ChatMsg {
     content: String, /* role: String */
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct Summary {
+    headline: String,
+    bullets: Vec<String>,
+    citations: Vec<String>,
+}
+
 async fn summarize_with_ollama(
     client: &Client,
     base: &str,
     model: &str,
     prompt: &str,
-) -> Result<(String, usize, usize)> {
+) -> Result<(Summary, usize, usize)> {
     let url = format!("{}/api/chat", base.trim_end_matches('/'));
 
     let body = ChatReq {
@@ -393,39 +405,51 @@ async fn summarize_with_ollama(
     let in_tok: usize = body
         .messages
         .iter()
-        .map(|m| bpe.encode_with_special_tokens(m.content).len())
+        .map(|m| bpe.clone().encode_with_special_tokens(m.content).len())
         .sum();
+
+    let bpe_out = bpe.clone();
+    let url_clone = url.clone();
+    let body_clone = body.clone();
 
     let backoff = ExponentialBackoff {
         max_elapsed_time: Some(Duration::from_secs(120)),
         ..Default::default()
     };
+    let op = move || {
+        let bpe = bpe_out.clone();
+        let url = url_clone.clone();
+        let body = body_clone.clone();
+        async move {
+            // send; treat connection/send/parse problems as transient
+            let resp = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| backoff::Error::transient(anyhow!("transport: {e:?}")))?;
 
-    let op = || async {
-        // send; treat connection/send/parse problems as transient
-        let resp = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| backoff::Error::transient(anyhow!("transport: {e:?}")))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(backoff::Error::transient(anyhow!("http {status}: {text}")));
+            }
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(backoff::Error::transient(anyhow!("http {status}: {text}")));
+            let r: ChatResp = resp
+                .json()
+                .await
+                .map_err(|e| backoff::Error::transient(anyhow!("decode: {e:?}")))?;
+
+            let raw = r.message.content;
+            let out_tok = bpe.encode_with_special_tokens(&raw).len();
+            let summary: Summary = serde_json::from_str(&raw)
+                .map_err(|e| backoff::Error::transient(anyhow!("json: {e:?} raw: {raw}")))?;
+
+            Ok::<(Summary, usize), backoff::Error<anyhow::Error>>((summary, out_tok))
         }
-
-        let r: ChatResp = resp
-            .json()
-            .await
-            .map_err(|e| backoff::Error::transient(anyhow!("decode: {e:?}")))?;
-
-        Ok::<String, backoff::Error<anyhow::Error>>(r.message.content)
     };
 
-    let summary = retry(backoff, op).await?;
-    let out_tok = bpe.encode_with_special_tokens(&summary).len();
+    let (summary, out_tok) = retry(backoff, op).await?;
     Ok((summary, in_tok, out_tok))
 }
 
