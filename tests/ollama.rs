@@ -1,4 +1,8 @@
 use reqwest::Client;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
 use zc_forum_etl::summarize_with_ollama;
 
 #[tokio::test]
@@ -25,4 +29,36 @@ async fn summarize_ollama_retry_error() {
     let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
     let res = summarize_with_ollama(&client, "http://127.0.0.1:1", "test-model", prompt).await;
     assert!(res.is_err());
+}
+
+#[tokio::test]
+async fn summarize_ollama_client_error_is_permanent() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(400))
+        .mount(&server)
+        .await;
+    let client = Client::new();
+    let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
+    let res = summarize_with_ollama(&client, &server.uri(), "test-model", prompt).await;
+    assert!(res.is_err());
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+}
+
+#[tokio::test]
+async fn summarize_ollama_server_error_is_transient() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let client = Client::new();
+    let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
+    let res = summarize_with_ollama(&client, &server.uri(), "test-model", prompt).await;
+    assert!(res.is_err());
+    let requests = server.received_requests().await.unwrap();
+    assert!(requests.len() > 1);
 }
