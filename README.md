@@ -47,3 +47,15 @@ graph TD
   S -.-> TR
 ```
 
+## Ollama model
+
+The repo includes a `Modelfile` that bakes in the summarizer's system prompt and default inference parameters.
+Build the model once and point `LLM_MODEL` at it:
+
+```bash
+ollama create zc-forum-summarizer -f Modelfile
+export LLM_MODEL=zc-forum-summarizer
+```
+
+You can tweak the `Modelfile` to experiment with other options like templates or adapters.
+

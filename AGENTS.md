@@ -53,7 +53,7 @@ graph TD
 
 * **Language:** Rust 1.89
 * **DB:** Postgres (via sqlx), tables: topics, posts, topic_summaries_llm
-* **LLM:** Ollama HTTP API /api/chat (Qwen2.5 latest or equivalent)
+* **LLM:** Ollama HTTP API /api/chat (Qwen2.5 latest or equivalent); system prompt and default parameters defined in `Modelfile`
 * **Timeouts/Backoff:** HTTP 120s total; exponential backoff for LLM calls; outer task timeout 120s
 * **Chunking:** first‑page posts only (vertical slice), char‑safe chunk ≤ 1.8k
 * **Summaries:** JSON → rendered into text; prefer LLM, fallback to heuristic if present
@@ -101,7 +101,7 @@ graph TD
 
 **Purpose:** Create concise, factual summaries with citations.
 
-**Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from LLM_MODEL (e.g., qwen2.5:latest).
+**Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from LLM_MODEL (e.g., qwen2.5:latest). System prompt and default inference parameters are baked into the repo's `Modelfile`; requests only send user prompts.
 
 **Providers:** Only the local Ollama endpoint is supported; the old multi-provider `llm` module has been removed.
 

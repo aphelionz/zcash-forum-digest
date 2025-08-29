@@ -1,0 +1,21 @@
+FROM qwen2.5:latest
+
+# System prompt used for all summaries
+SYSTEM """
+You are a technical note-taker. Output a one-line headline and 3–6 factual bullets.
+Include dates/numbers from the text. No speculation. If off-topic/banter, say: 'Meta: off-topic'.
+"""
+
+# Default inference parameters
+PARAMETER temperature 0.2
+PARAMETER num_ctx 8192
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05
+
+# The user prompt already requests strict JSON output, but the template reminds the model
+TEMPLATE """
+{{- if .System }}{{ .System }}{{ end }}
+{{- range .Messages }}{{ .Content }}{{ end }}
+
+Respond ONLY with valid JSON.
+"""

@@ -16,6 +16,7 @@ const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
 const SUM_TIMEOUT_SECS: u64 = 120; // wrap around our own retry/HTTP timeouts
 
 const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
+const SYSTEM_PROMPT: &str = "You are a technical note-taker. Output a one-line headline and 3–6 factual bullets. Include dates/numbers from the text. No speculation. If off-topic/banter, say: 'Meta: off-topic'.";
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 
 #[derive(Debug, Deserialize)]
@@ -342,16 +343,6 @@ struct ChatReq<'a> {
     messages: Vec<Msg<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     keep_alive: Option<&'a str>, // keep model in memory for a bit
-    #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<OllamaOpts>,
-}
-
-#[derive(Serialize, Clone)]
-struct OllamaOpts {
-    temperature: f32,
-    num_ctx: usize,
-    top_p: f32,
-    repeat_penalty: f32,
 }
 
 #[derive(Deserialize)]
@@ -382,31 +373,19 @@ async fn summarize_with_ollama(
         model,
         stream: false,
         keep_alive: Some("5m"),
-        messages: vec![
-            Msg {
-                role: "system",
-                content: "You are a technical note-taker. Output a one-line headline and 3–6 factual bullets. \
-                 Include dates/numbers from the text. No speculation. If off-topic/banter, say: 'Meta: off-topic'.",
-            },
-            Msg {
-                role: "user",
-                content: prompt,
-            },
-        ],
-        options: Some(OllamaOpts {
-            temperature: 0.2,
-            num_ctx: 8192,
-            top_p: 0.9,
-            repeat_penalty: 1.05,
-        }),
+        messages: vec![Msg {
+            role: "user",
+            content: prompt,
+        }],
     };
 
     let bpe = cl100k_base().map_err(|e| anyhow!("tokenizer: {e:?}"))?;
-    let in_tok: usize = body
+    let mut in_tok = bpe.clone().encode_with_special_tokens(SYSTEM_PROMPT).len();
+    in_tok += body
         .messages
         .iter()
         .map(|m| bpe.clone().encode_with_special_tokens(m.content).len())
-        .sum();
+        .sum::<usize>();
 
     let bpe_out = bpe.clone();
     let url_clone = url.clone();
