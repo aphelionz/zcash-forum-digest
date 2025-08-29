@@ -115,6 +115,8 @@ graph TD
 
 **Warmup:** one tiny request before processing to force model load.
 
+**Tokenization:** prompt and response tokens counted via `tiktoken-rs` and stored as `input_tokens`/`output_tokens`.
+
 **Outputs → DB:** topic_summaries_llm(topic_id, summary, model, prompt_hash, input_tokens, output_tokens, updated_at).
 
 **Failure Handling:** timeout/HTTP error → warn and continue; process remains healthy.

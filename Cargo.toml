@@ -20,3 +20,4 @@ stopwords = "0.1"
 once_cell = "1.21.3"
 backoff = { version = "0.4", features = ["tokio"] }
 sha2 = "0.10"
+tiktoken-rs = "0.7"
