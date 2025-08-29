@@ -69,9 +69,12 @@ async fn main() -> Result<()> {
     let ollama_base =
         std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| OLLAMA_DEFAULT_BASE.to_string());
 
-    // Warm up the model once (ignore the result).
+    // Warm up the model once and warn if it fails.
     let warm_prompt = build_prompt("warmup", "warmup");
-    let _ = summarize_with_ollama(&client, &ollama_base, &model, &warm_prompt).await;
+    let warmup_res = summarize_with_ollama(&client, &ollama_base, &model, &warm_prompt).await;
+    if let Err(e) = warmup_res {
+        warn!("Warm-up summarize_with_ollama failed: {e}");
+    }
 
     // Fetch latest list of topics
     let latest: Latest = fetch_latest(&client).await?;
