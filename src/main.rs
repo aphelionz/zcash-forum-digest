@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, query, query_scalar};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
 
@@ -229,19 +229,23 @@ async fn posts_changed_since_last_llm(pool: &PgPool, topic_id: i64) -> Result<bo
 /* ---------------- Text prep ---------------- */
 
 async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
-    let rows =
-        query(r#"SELECT cooked FROM posts WHERE topic_id = $1 ORDER BY created_at ASC LIMIT $2"#)
-            .bind(topic_id)
-            .bind(MAX_POSTS_FOR_CHUNK as i64)
-            .fetch_all(pool)
-            .await?;
+    let rows = query(
+        r#"SELECT id, created_at, cooked FROM posts WHERE topic_id = $1 ORDER BY created_at ASC LIMIT $2"#,
+    )
+    .bind(topic_id)
+    .bind(MAX_POSTS_FOR_CHUNK as i64)
+    .fetch_all(pool)
+    .await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
         let cooked: String = r.get("cooked");
+        let id: i64 = r.get("id");
+        let created_at: OffsetDateTime = r.get("created_at");
         let t = strip_tags_fast(&cooked);
         if !t.is_empty() {
-            out.push(t);
+            let ts = created_at.format(&Rfc3339)?;
+            out.push(format!("[post:{id} @ {ts}] {t}"));
         }
     }
     Ok(out)
