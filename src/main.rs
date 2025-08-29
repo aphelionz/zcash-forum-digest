@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::{StreamExt, stream};
 use reqwest::Client;
 use serde::Deserialize;
 use sqlx::{PgPool, Row, query};
@@ -6,13 +7,13 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
 use zc_forum_etl::{
-    BPE, make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast,
-    summarize_with_ollama,
+    make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast, summarize_with_ollama,
 };
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
 const SUM_TIMEOUT_SECS: u64 = 120; // wrap around our own retry/HTTP timeouts
+const TOPIC_CONCURRENCY: usize = 5; // limit concurrent topic processing
 
 const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
 
@@ -77,103 +78,128 @@ async fn main() -> Result<()> {
     let latest: Latest = fetch_latest(&client).await?;
     info!("Fetched {} topics", latest.topic_list.topics.len());
 
-    for topic in latest.topic_list.topics {
-        // Upsert topic metadata
+    let topics = latest.topic_list.topics;
+    stream::iter(topics.into_iter())
+        .map(|topic| {
+            let client = client.clone();
+            let pool = pool.clone();
+            let model = model.clone();
+            let ollama_base = ollama_base.clone();
+            async move {
+                if let Err(e) = process_topic(client, pool, model, ollama_base, topic).await {
+                    warn!("Topic processing failed: {e:?}");
+                }
+            }
+        })
+        .buffer_unordered(TOPIC_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+
+    info!("ETL + local LLM summaries complete.");
+    Ok(())
+}
+
+async fn process_topic(
+    client: Client,
+    pool: PgPool,
+    model: String,
+    ollama_base: String,
+    topic: TopicStub,
+) -> Result<()> {
+    // Upsert topic metadata
+    query!(
+        r#"INSERT INTO topics (id, title) VALUES ($1, $2)
+           ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title"#,
+        topic.id as i64,
+        topic.title
+    )
+    .execute(&pool)
+    .await?;
+
+    // Fetch first page of posts for this topic
+    let full = fetch_topic(&client, topic.id).await?;
+    info!("Topic {} → {} posts", full.id, full.post_stream.posts.len());
+
+    // Upsert posts
+    for p in full.post_stream.posts {
         query!(
-            r#"INSERT INTO topics (id, title) VALUES ($1, $2)
-               ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title"#,
-            topic.id as i64,
-            topic.title
+            r#"
+            INSERT INTO posts (id, topic_id, username, cooked, created_at)
+            VALUES ($1,$2,$3,$4,$5)
+            ON CONFLICT (id) DO UPDATE SET
+              topic_id = EXCLUDED.topic_id,
+              username = EXCLUDED.username,
+              cooked = EXCLUDED.cooked,
+              created_at = EXCLUDED.created_at
+            "#,
+            p.id as i64,
+            p.topic_id as i64,
+            p.username,
+            p.cooked,
+            p.created_at
         )
         .execute(&pool)
         .await?;
+    }
 
-        // Fetch first page of posts for this topic
-        let full = fetch_topic(&client, topic.id).await?;
-        info!("Topic {} → {} posts", full.id, full.post_stream.posts.len());
+    // Skip if no new posts since last LLM summary
+    if !posts_changed_since_last_llm(&pool, topic.id as i64).await? {
+        info!("Topic {} unchanged since last LLM summary → skip", topic.id);
+        return Ok(());
+    }
 
-        // Upsert posts
-        for p in full.post_stream.posts {
+    // Build compact chunk from first-page posts
+    let lines = load_plain_lines(&pool, topic.id as i64).await?;
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let chunk = make_chunk(&lines, CHUNK_MAX_CHARS);
+    if chunk.is_empty() {
+        return Ok(());
+    }
+
+    let prompt = build_prompt(&topic.title, &chunk);
+    let phash = prompt_hash(topic.id as i64, &model, &prompt);
+
+    // LLM call with outer timeout guard
+    let started = std::time::Instant::now();
+    match timeout(
+        Duration::from_secs(SUM_TIMEOUT_SECS),
+        summarize_with_ollama(&client, &ollama_base, &model, &prompt),
+    )
+    .await
+    {
+        Err(_) => {
+            warn!("LLM summarize timed out for {}", topic.id);
+        }
+        Ok(Err(e)) => {
+            warn!("LLM summarize failed for {}: {e}", topic.id);
+        }
+        Ok(Ok((summary, in_tok, out_tok))) => {
+            let summary_json = serde_json::to_string(&summary)?;
             query!(
                 r#"
-                INSERT INTO posts (id, topic_id, username, cooked, created_at)
-                VALUES ($1,$2,$3,$4,$5)
-                ON CONFLICT (id) DO UPDATE SET
-                  topic_id = EXCLUDED.topic_id,
-                  username = EXCLUDED.username,
-                  cooked = EXCLUDED.cooked,
-                  created_at = EXCLUDED.created_at
+                INSERT INTO topic_summaries_llm (topic_id, summary, model, prompt_hash, input_tokens, output_tokens, cost_usd)
+                VALUES ($1, $2, $3, $4, $5, $6, NULL)
+                ON CONFLICT (topic_id) DO UPDATE SET
+                  summary = EXCLUDED.summary,
+                  model = EXCLUDED.model,
+                  prompt_hash = EXCLUDED.prompt_hash,
+                  input_tokens = EXCLUDED.input_tokens,
+                  output_tokens = EXCLUDED.output_tokens,
+                  updated_at = now()
                 "#,
-                p.id as i64,
-                p.topic_id as i64,
-                p.username,
-                p.cooked,
-                p.created_at
-            )
-            .execute(&pool)
-            .await?;
-        }
+                topic.id as i64, summary_json, model, phash, in_tok as i32, out_tok as i32
+            ).execute(&pool).await?;
 
-        // Skip if no new posts since last LLM summary
-        if !posts_changed_since_last_llm(&pool, topic.id as i64).await? {
-            info!("Topic {} unchanged since last LLM summary → skip", topic.id);
-            continue;
-        }
-
-        // Build compact chunk from first-page posts
-        let lines = load_plain_lines(&pool, topic.id as i64).await?;
-        if lines.is_empty() {
-            continue;
-        }
-        let chunk = make_chunk(&lines, CHUNK_MAX_CHARS);
-        if chunk.is_empty() {
-            continue;
-        }
-
-        let prompt = build_prompt(&topic.title, &chunk);
-        let phash = prompt_hash(topic.id as i64, &model, &prompt);
-
-        // LLM call with outer timeout guard
-        let started = std::time::Instant::now();
-        match timeout(
-            Duration::from_secs(SUM_TIMEOUT_SECS),
-            summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-        )
-        .await
-        {
-            Err(_) => {
-                warn!("LLM summarize timed out for {}", topic.id);
-            }
-            Ok(Err(e)) => {
-                warn!("LLM summarize failed for {}: {e}", topic.id);
-            }
-            Ok(Ok((summary, in_tok, out_tok))) => {
-                let summary_json = serde_json::to_string(&summary)?;
-                query!(
-                    r#"
-                    INSERT INTO topic_summaries_llm (topic_id, summary, model, prompt_hash, input_tokens, output_tokens, cost_usd)
-                    VALUES ($1, $2, $3, $4, $5, $6, NULL)
-                    ON CONFLICT (topic_id) DO UPDATE SET
-                      summary = EXCLUDED.summary,
-                      model = EXCLUDED.model,
-                      prompt_hash = EXCLUDED.prompt_hash,
-                      input_tokens = EXCLUDED.input_tokens,
-                      output_tokens = EXCLUDED.output_tokens,
-                      updated_at = now()
-                    "#,
-                    topic.id as i64, summary_json, model, phash, in_tok as i32, out_tok as i32
-                ).execute(&pool).await?;
-
-                info!(
-                    "LLM summarized topic {} in {:?}",
-                    topic.id,
-                    started.elapsed()
-                );
-            }
+            info!(
+                "LLM summarized topic {} in {:?}",
+                topic.id,
+                started.elapsed()
+            );
         }
     }
 
-    info!("ETL + local LLM summaries complete.");
     Ok(())
 }
 
