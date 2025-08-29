@@ -109,7 +109,7 @@ graph TD
 
 * System: technical note‑taker, headline + 3–6 bullets, no speculation.
 * User: thread title + excerpt with `[post:<id> @ <ts>]` lines.
-* Output: strict JSON `{headline, bullets[], citations[]}`.
+* Output: strict JSON `{headline, bullets[], citations[]}` stored verbatim in `topic_summaries_llm.summary`.
 
 **Backoff/Timeout:** transport + parse errors are transient; 120s max elapsed.
 
@@ -126,7 +126,7 @@ graph TD
 **Tables:**
 * `topics(id BIGINT PRIMARY KEY, title TEXT)`
 * `posts(id BIGINT PRIMARY KEY, topic_id BIGINT, username TEXT, cooked TEXT, created_at TIMESTAMPTZ)`
-* `topic_summaries_llm(topic_id PK, summary TEXT, model TEXT, prompt_hash TEXT, input_tokens INT, output_tokens INT, cost_usd NUMERIC, updated_at TIMESTAMPTZ)`
+* `topic_summaries_llm(topic_id PK, summary TEXT  -- JSON {headline, bullets, citations}, model TEXT, prompt_hash TEXT, input_tokens INT, output_tokens INT, cost_usd NUMERIC, updated_at TIMESTAMPTZ)`
 
 **Indexes:**
 * `posts(topic_id, created_at)`
