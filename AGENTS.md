@@ -93,7 +93,8 @@ graph TD
 
 **Purpose:** Convert HTML (`cooked`) to space‑normalized text and build an excerpt with post IDs & timestamps.
 
-**Logic:** regex `<[^>]*>` removal; whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
+**Logic:** HTML parsed via `html5ever` with entity decoding and `script/style` removal;
+whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Limits:** ≤ 1.8k chars (char‑safe truncation).
 
