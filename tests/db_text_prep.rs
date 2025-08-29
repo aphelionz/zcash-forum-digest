@@ -1,11 +1,12 @@
-#[path = "../src/main.rs"]
-mod main_rs;
-
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlx::{query, PgPool};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use zc_forum_etl::make_chunk;
+use zc_forum_etl::{load_plain_lines, make_chunk};
+
+static LINE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\[post:\d+ @ [^\]]+\] .+").unwrap());
 
 #[sqlx::test(migrations = "./migrations")]
 async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
@@ -36,7 +37,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
         .execute(&pool)
         .await?;
 
-    let lines = main_rs::load_plain_lines(&pool, 1).await?;
+    let lines = load_plain_lines(&pool, 1).await?;
 
     // ensure ordering by created_at
     assert_eq!(lines.len(), 2);
@@ -49,9 +50,8 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
     }
 
     // each line should match pattern
-    let re = Regex::new(r"^\[post:\d+ @ [^\]]+\] .+").unwrap();
     for l in &lines {
-        assert!(re.is_match(l), "line did not match pattern: {l}");
+        assert!(LINE_RE.is_match(l), "line did not match pattern: {l}");
     }
 
     // optional: ensure chunking respects length limit

@@ -2,15 +2,14 @@ use anyhow::Result;
 use futures::{StreamExt, stream};
 use reqwest::Client;
 use serde::Deserialize;
-use sqlx::{PgPool, Row, query};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use sqlx::{PgPool, query};
+use time::OffsetDateTime;
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
 use zc_forum_etl::{
-    make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast, summarize_with_ollama,
+    load_plain_lines, make_chunk, posts_changed_since_last_llm, prompt_hash, summarize_with_ollama,
 };
 
-const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
 const SUM_TIMEOUT_SECS: u64 = 120; // wrap around our own retry/HTTP timeouts
 const TOPIC_CONCURRENCY: usize = 5; // limit concurrent topic processing
@@ -226,31 +225,6 @@ async fn fetch_topic(client: &Client, id: u64) -> Result<TopicFull> {
         .error_for_status()?
         .json::<TopicFull>()
         .await?)
-}
-
-/* ---------------- Text prep ---------------- */
-
-pub async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
-    let rows = query(
-        r#"SELECT id, created_at, cooked FROM posts WHERE topic_id = $1 ORDER BY created_at ASC LIMIT $2"#,
-    )
-    .bind(topic_id)
-    .bind(MAX_POSTS_FOR_CHUNK as i64)
-    .fetch_all(pool)
-    .await?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for r in rows {
-        let cooked: String = r.get("cooked");
-        let id: i64 = r.get("id");
-        let created_at: OffsetDateTime = r.get("created_at");
-        let t = strip_tags_fast(&cooked);
-        if !t.is_empty() {
-            let ts = created_at.format(&Rfc3339)?;
-            out.push(format!("[post:{id} @ {ts}] {t}"));
-        }
-    }
-    Ok(out)
 }
 
 /* Formatting instructions are in Modelfile */

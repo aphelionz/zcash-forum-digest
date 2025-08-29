@@ -2,9 +2,9 @@ use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, query_scalar};
+use sqlx::{PgPool, Row, query, query_scalar};
 use tiktoken_rs::{CoreBPE, cl100k_base};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub mod ollama;
 pub use ollama::{Summary, summarize_with_ollama};
@@ -12,6 +12,8 @@ pub use ollama::{Summary, summarize_with_ollama};
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 pub static BPE: Lazy<CoreBPE> =
     Lazy::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
+
+const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 
 pub fn strip_tags_fast(html: &str) -> String {
     let no_tags = TAGS_RE.replace_all(html, " ");
@@ -66,6 +68,29 @@ pub fn make_chunk(lines: &[String], max_chars: usize) -> String {
         }
     }
     cur
+}
+
+pub async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
+    let rows = query(
+        r#"SELECT id, created_at, cooked FROM posts WHERE topic_id = $1 ORDER BY created_at ASC LIMIT $2"#,
+    )
+    .bind(topic_id)
+    .bind(MAX_POSTS_FOR_CHUNK as i64)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let cooked: String = r.get("cooked");
+        let id: i64 = r.get("id");
+        let created_at: OffsetDateTime = r.get("created_at");
+        let t = strip_tags_fast(&cooked);
+        if !t.is_empty() {
+            let ts = created_at.format(&Rfc3339)?;
+            out.push(format!("[post:{id} @ {ts}] {t}"));
+        }
+    }
+    Ok(out)
 }
 
 pub fn prompt_hash(topic_id: i64, model: &str, prompt: &str) -> String {
