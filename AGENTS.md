@@ -103,6 +103,8 @@ graph TD
 
 **Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from LLM_MODEL (e.g., qwen2.5:latest).
 
+**Providers:** Only the local Ollama endpoint is supported; the old multi-provider `llm` module has been removed.
+
 **Prompt:**
 
 * System: technical note‑taker, headline + 3–6 bullets, no speculation.
