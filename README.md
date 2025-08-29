@@ -106,6 +106,10 @@ graph TD
   S -.-> TR
 ```
 
+During text preparation, post HTML is parsed with a lightweight HTML5 parser
+that decodes entities and removes `script`/`style` blocks before whitespace
+is normalized.
+
 ## Configuration
 Environment variables:
 - `DATABASE_URL`: Postgres connection string

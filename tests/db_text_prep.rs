@@ -23,7 +23,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
         .bind(10_i64)
         .bind(1_i64)
         .bind("alice")
-        .bind("<p>First <b>post</b></p>")
+        .bind("<p>First &amp; <b>post</b><script>alert('x')</script></p>")
         .bind(t_old)
         .execute(&pool)
         .await?;
@@ -31,7 +31,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
         .bind(11_i64)
         .bind(1_i64)
         .bind("bob")
-        .bind("<div>Second <i>post</i></div>")
+        .bind("<div>Second <i>post</i><style>p{}</style></div>")
         .bind(t_new)
         .execute(&pool)
         .await?;
@@ -40,7 +40,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
 
     // ensure ordering by created_at
     assert_eq!(lines.len(), 2);
-    assert!(lines[0].contains("First post"));
+    assert!(lines[0].contains("First & post"));
     assert!(lines[1].contains("Second post"));
 
     // HTML tags should be gone
@@ -60,7 +60,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
     // ensure actual timestamps in formatted string
     let ts_old = t_old.format(&Rfc3339)?;
     let ts_new = t_new.format(&Rfc3339)?;
-    assert_eq!(lines[0], format!("[post:10 @ {ts_old}] First post"));
+    assert_eq!(lines[0], format!("[post:10 @ {ts_old}] First & post"));
     assert_eq!(lines[1], format!("[post:11 @ {ts_new}] Second post"));
 
     Ok(())

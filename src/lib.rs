@@ -1,6 +1,7 @@
 use anyhow::Result;
+use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use once_cell::sync::Lazy;
-use regex::Regex;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, query, query_scalar};
 use tiktoken_rs::{CoreBPE, cl100k_base};
@@ -9,15 +10,39 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 pub mod ollama;
 pub use ollama::{Summary, summarize_with_ollama};
 
-static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 pub static BPE: Lazy<CoreBPE> =
     Lazy::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 
+/// Strip HTML tags, decode entities, and drop script/style blocks.
 pub fn strip_tags_fast(html: &str) -> String {
-    let no_tags = TAGS_RE.replace_all(html, " ");
-    squeeze_ws(no_tags.trim())
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(html);
+
+    fn walk(handle: &Handle, out: &mut String) {
+        match &handle.data {
+            NodeData::Text { contents } => {
+                out.push_str(&contents.borrow());
+                out.push(' ');
+            }
+            NodeData::Element { name, .. } => {
+                let local = name.local.as_ref();
+                if local.eq_ignore_ascii_case("script") || local.eq_ignore_ascii_case("style") {
+                    return;
+                }
+            }
+            _ => {}
+        }
+        for child in handle.children.borrow().iter() {
+            walk(child, out);
+        }
+    }
+
+    let mut text = String::new();
+    for child in dom.document.children.borrow().iter() {
+        walk(child, &mut text);
+    }
+    squeeze_ws(text.trim())
 }
 
 pub fn squeeze_ws(s: &str) -> String {
@@ -138,6 +163,13 @@ mod tests {
     fn strip_tags_fast_removes_html_and_normalizes_space() {
         let html = "<p>Hello <b>world</b></p>\n<div>Rust lang</div>";
         assert_eq!(strip_tags_fast(html), "Hello world Rust lang");
+    }
+
+    #[test]
+    fn strip_tags_fast_decodes_entities_and_drops_script_style() {
+        let html =
+            "<p>Tom &amp; Jerry</p><script>var x = 1;</script><style>body{color:red}</style>";
+        assert_eq!(strip_tags_fast(html), "Tom & Jerry");
     }
 
     #[test]
