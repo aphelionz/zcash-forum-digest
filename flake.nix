@@ -76,8 +76,7 @@
             export PS1="\[\033[1;36m\](zc-forum)\[\033[0m\] $PS1"
 
             # start "daemons"
-            just pg-start
-            just ollama-start
+            just startup
 
             # stop Postgres when shell exits
             trap 'echo "Tearing down"; just teardown || true' EXIT
@@ -92,6 +91,8 @@
             echo "  just test         # nextest"
             echo "  just lint         # clippy + fmt check"
             echo "  just cov          # coverage (llvm-cov)"
+            echo
+            echo "Doc server available at http://localhost:6419 (grip)"
             echo
           '';
         };
