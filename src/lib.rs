@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use tiktoken_rs::{CoreBPE, cl100k_base};
 
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
-pub static BPE: Lazy<CoreBPE> = Lazy::new(|| cl100k_base().expect("tokenizer"));
+pub static BPE: Lazy<CoreBPE> = Lazy::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
 
 pub fn strip_tags_fast(html: &str) -> String {
     let no_tags = TAGS_RE.replace_all(html, " ");
