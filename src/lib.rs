@@ -23,16 +23,34 @@ pub fn strip_tags_fast(html: &str) -> String {
         match &handle.data {
             NodeData::Text { contents } => {
                 out.push_str(&contents.borrow());
-                out.push(' ');
+                // Do not unconditionally add a space here.
             }
             NodeData::Element { name, .. } => {
                 let local = name.local.as_ref();
                 if local.eq_ignore_ascii_case("script") || local.eq_ignore_ascii_case("style") {
                     return;
                 }
+                // After processing children, add a space if this is a block-level element.
+                let is_block = matches!(
+                    local,
+                    "address" | "article" | "aside" | "blockquote" | "canvas" | "dd" | "div"
+                        | "dl" | "dt" | "fieldset" | "figcaption" | "figure" | "footer"
+                        | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "header"
+                        | "hr" | "li" | "main" | "nav" | "noscript" | "ol" | "output"
+                        | "p" | "pre" | "section" | "table" | "tfoot" | "ul" | "video"
+                        | "tr" | "td" | "th" | "br"
+                );
+                for child in handle.children.borrow().iter() {
+                    walk(child, out);
+                }
+                if is_block {
+                    out.push(' ');
+                }
+                return;
             }
             _ => {}
         }
+        // For non-element nodes, walk children as before.
         for child in handle.children.borrow().iter() {
             walk(child, out);
         }
