@@ -103,8 +103,14 @@ pub async fn summarize_with_ollama(
 
             let raw = r.message.content;
             let out_tok = BPE.encode_with_special_tokens(&raw).len();
-            let summary: Summary = serde_json::from_str(&raw)
-                .map_err(|e| backoff::Error::transient(anyhow!("json: {e:?} raw: {raw}")))?;
+            let summary: Summary = serde_json::from_str(&raw).map_err(|e| {
+                let mut chars = raw.chars();
+                let mut truncated: String = chars.by_ref().take(200).collect();
+                if chars.next().is_some() {
+                    truncated.push_str("...");
+                }
+                backoff::Error::transient(anyhow!("json: {e:?} raw: {truncated}"))
+            })?;
 
             Ok::<(Summary, usize), backoff::Error<anyhow::Error>>((summary, out_tok))
         }
