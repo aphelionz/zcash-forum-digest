@@ -1,8 +1,10 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use tiktoken_rs::{CoreBPE, cl100k_base};
 
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
+pub static BPE: Lazy<CoreBPE> = Lazy::new(|| cl100k_base().expect("tokenizer"));
 
 pub fn strip_tags_fast(html: &str) -> String {
     let no_tags = TAGS_RE.replace_all(html, " ");
@@ -100,5 +102,11 @@ mod tests {
         ];
         let chunk = make_chunk(&lines, 11);
         assert_eq!(chunk, "12345\n67890");
+    }
+
+    #[test]
+    fn bpe_static_encodes() {
+        let tokens = BPE.encode_with_special_tokens("hello");
+        assert!(!tokens.is_empty());
     }
 }

@@ -3,11 +3,10 @@ use backoff::{ExponentialBackoff, future::retry};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row, query, query_scalar};
-use tiktoken_rs::cl100k_base;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
-use zc_forum_etl::{make_chunk, prompt_hash, strip_tags_fast};
+use zc_forum_etl::{BPE, make_chunk, prompt_hash, strip_tags_fast};
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
@@ -311,14 +310,13 @@ async fn summarize_with_ollama(
         }],
     };
 
-    let bpe = cl100k_base().map_err(|e| anyhow!("tokenizer: {e:?}"))?;
     let in_tok: usize = body
         .messages
         .iter()
-        .map(|m| bpe.clone().encode_with_special_tokens(m.content).len())
+        .map(|m| BPE.encode_with_special_tokens(m.content).len())
         .sum();
 
-    let bpe_out = bpe.clone();
+    let bpe_out = BPE.clone();
     let url_clone = url.clone();
     let body_clone = body.clone();
 
