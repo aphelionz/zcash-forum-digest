@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, query, query_scalar};
+use tiktoken_rs::cl100k_base;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
@@ -388,6 +389,13 @@ async fn summarize_with_ollama(
         }),
     };
 
+    let bpe = cl100k_base().map_err(|e| anyhow!("tokenizer: {e:?}"))?;
+    let in_tok: usize = body
+        .messages
+        .iter()
+        .map(|m| bpe.encode_with_special_tokens(m.content).len())
+        .sum();
+
     let backoff = ExponentialBackoff {
         max_elapsed_time: Some(Duration::from_secs(120)),
         ..Default::default()
@@ -413,10 +421,12 @@ async fn summarize_with_ollama(
             .await
             .map_err(|e| backoff::Error::transient(anyhow!("decode: {e:?}")))?;
 
-        Ok::<(String, usize, usize), backoff::Error<anyhow::Error>>((r.message.content, 0, 0))
+        Ok::<String, backoff::Error<anyhow::Error>>(r.message.content)
     };
 
-    retry(backoff, op).await
+    let summary = retry(backoff, op).await?;
+    let out_tok = bpe.encode_with_special_tokens(&summary).len();
+    Ok((summary, in_tok, out_tok))
 }
 
 /* ---------------- Utils ---------------- */
