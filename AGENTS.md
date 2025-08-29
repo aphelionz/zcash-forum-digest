@@ -158,6 +158,7 @@ graph TD
 **Purpose:** Lint and test on pushes and PRs.
 
 **Workflow:** `.github/workflows/ci.yml` runs `cargo fmt --all -- --check`, `cargo clippy --all-features --lib -- -D warnings`, and `cargo nextest run --all-features --lib`.
+It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across runs.
 
 ## Configuration
 
