@@ -24,7 +24,7 @@ for quick review.
 ### Dependencies
 - Rust 1.89+
 - Postgres
-- [Ollama](https://ollama.com/) with the desired model pre-pulled (default: `qwen2.5:latest`)
+- [Ollama](https://ollama.com/)
 - [just](https://github.com/casey/just) and [Nix](https://nixos.org/) for the dev shell (optional)
 
 ### Steps
@@ -38,6 +38,9 @@ $ nix develop
 
 # Set up database
 $ just db-create
+
+# Build the local model with the provided Modelfile
+$ ollama create zc-forum-summarizer -f Modelfile
 ```
 
 ## Usage
@@ -106,11 +109,12 @@ graph TD
 ## Configuration
 Environment variables:
 - `DATABASE_URL`: Postgres connection string
-- `LLM_MODEL`: Ollama model tag (default `qwen2.5:latest`)
+- `LLM_MODEL`: Ollama model tag (default: `qwen2.5:latest`. For tuned prompts, it is recommended to build and use `zc-forum-summarizer` from the provided `Modelfile`.)
 - `OLLAMA_BASE_URL`: base URL for the Ollama API (default `http://127.0.0.1:11434`)
 
-Ollama runtime options are tuned for local inference:
-`temperature=0.2`, `num_ctx=8192`, `top_p=0.9`, `repeat_penalty=1.05`, and `keep_alive="5m"`.
+The `Modelfile` embeds the system prompt and default runtime parameters. Adjust it to tweak
+`temperature`, `num_ctx`, or other options and recreate the model. Requests send only the
+thread excerpt; formatting rules live in the model.
 
 ## Development
 Run formatting, linting, and tests before committing:

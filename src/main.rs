@@ -251,17 +251,10 @@ async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/* Formatting instructions are in Modelfile */
 fn build_prompt(topic_title: &str, chunk: &str) -> String {
     format!(
-        "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---\n\n\
-         Summarize for a technical audience. Respond ONLY with strict JSON:\n\
-         {{\"headline\": string, \"bullets\": [strings], \"citations\": [strings]}}\n\
-         Rules:\n\
-         - Headline ≤15 words\n\
-         - 3–6 concise bullets with concrete facts, dates, statuses, decisions\n\
-         - Citations reference [post:<id>] lines from the excerpt\n\
-         - If off-topic/banter, set headline to 'Meta: off-topic' and bullets/citations to []\n\
-         - No speculation. No marketing fluff.",
+        "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---",
         title = topic_title,
         body = chunk
     )
@@ -282,16 +275,6 @@ struct ChatReq<'a> {
     messages: Vec<Msg<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     keep_alive: Option<&'a str>, // keep model in memory for a bit
-    #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<OllamaOpts>,
-}
-
-#[derive(Serialize, Clone)]
-struct OllamaOpts {
-    temperature: f32,
-    num_ctx: usize,
-    top_p: f32,
-    repeat_penalty: f32,
 }
 
 #[derive(Deserialize)]
@@ -322,23 +305,10 @@ async fn summarize_with_ollama(
         model,
         stream: false,
         keep_alive: Some("5m"),
-        messages: vec![
-            Msg {
-                role: "system",
-                content: "You are a technical note-taker. Output a one-line headline and 3–6 factual bullets. \
-                 Include dates/numbers from the text. No speculation. If off-topic/banter, say: 'Meta: off-topic'.",
-            },
-            Msg {
-                role: "user",
-                content: prompt,
-            },
-        ],
-        options: Some(OllamaOpts {
-            temperature: 0.2,
-            num_ctx: 8192,
-            top_p: 0.9,
-            repeat_penalty: 1.05,
-        }),
+        messages: vec![Msg {
+            role: "user",
+            content: prompt,
+        }],
     };
 
     let bpe = cl100k_base().map_err(|e| anyhow!("tokenizer: {e:?}"))?;

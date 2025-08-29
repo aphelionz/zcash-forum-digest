@@ -101,13 +101,14 @@ graph TD
 
 **Purpose:** Create concise, factual summaries with citations.
 
-**Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from LLM_MODEL (e.g., qwen2.5:latest).
+**Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from `LLM_MODEL`
+(`zc-forum-summarizer` built from `Modelfile` by default).
 
 **Providers:** Only the local Ollama endpoint is supported; the old multi-provider `llm` module has been removed.
 
 **Prompt:**
 
-* System: technical note‑taker, headline + 3–6 bullets, no speculation.
+* System: embedded in `Modelfile` — technical note‑taker returning JSON.
 * User: thread title + excerpt with `[post:<id> @ <ts>]` lines.
 * Output: strict JSON `{headline, bullets[], citations[]}` stored verbatim in `topic_summaries_llm.summary`.
 
@@ -168,7 +169,7 @@ It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across
 * `LLM_MODEL=qwen2.5:latest`
 * `OLLAMA_BASE_URL=http://127.0.0.1:11434` (or custom port)
 
-**Runtime knobs (Ollama options):** temperature=0.2, num_ctx=8192, top_p=0.9, repeat_penalty=1.05, keep_alive="5m".
+**Runtime knobs (Ollama options):** set in `Modelfile` (`temperature=0.2`, `num_ctx=8192`, `top_p=0.9`, `repeat_penalty=1.05`); requests use `keep_alive="5m"`.
 
 ## Failure Modes & Remedies
 

@@ -60,7 +60,7 @@
           PGDATA = pg.data;
           DATABASE_URL = "postgresql://${pg.user}@${pg.host}:${pg.port}/${pg.name}";
           LLM_SUMMARIZER = "ollama";
-          LLM_MODEL = "qwen2.5:latest";
+          LLM_MODEL = "zc-forum-summarizer";
           OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
           shellHook = ''
