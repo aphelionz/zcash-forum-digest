@@ -211,12 +211,12 @@ async fn posts_changed_since_last_llm(pool: &PgPool, topic_id: i64) -> Result<bo
             .await?;
 
     // last time we summarized with LLM
-    let last_llm: Option<OffsetDateTime> =
-        query_scalar(r#"SELECT updated_at FROM topic_summaries_llm WHERE topic_id = $1"#)
-            .bind(topic_id)
-            .fetch_optional(pool)
-            .await?
-            .flatten();
+    let last_llm: Option<OffsetDateTime> = query_scalar::<_, OffsetDateTime>(
+        r#"SELECT updated_at FROM topic_summaries_llm WHERE topic_id = $1"#,
+    )
+    .bind(topic_id)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(match (max_created, last_llm) {
         (None, _) => false,
