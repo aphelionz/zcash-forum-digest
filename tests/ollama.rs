@@ -21,14 +21,10 @@ async fn summarize_ollama_local() {
 
 #[tokio::test]
 async fn summarize_ollama_retry_error() {
-    unsafe {
-        std::env::set_var("OLLAMA_MAX_ELAPSED_SECS", "1");
-    }
+    std::env::set_var("OLLAMA_MAX_ELAPSED_SECS", "1");
     let client = Client::new();
     let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
     let res = summarize_with_ollama(&client, "http://127.0.0.1:1", "test-model", prompt).await;
     assert!(res.is_err());
-    unsafe {
-        std::env::remove_var("OLLAMA_MAX_ELAPSED_SECS");
-    }
+    std::env::remove_var("OLLAMA_MAX_ELAPSED_SECS");
 }
