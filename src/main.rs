@@ -1,22 +1,19 @@
 use anyhow::{Result, anyhow};
 use backoff::{ExponentialBackoff, future::retry};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, query, query_scalar};
 use tiktoken_rs::cl100k_base;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
+use zc_forum_etl::{make_chunk, prompt_hash, strip_tags_fast};
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
 const SUM_TIMEOUT_SECS: u64 = 120; // wrap around our own retry/HTTP timeouts
 
 const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
-static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 
 #[derive(Debug, Deserialize)]
 struct Latest {
@@ -254,63 +251,6 @@ async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
     Ok(out)
 }
 
-fn strip_tags_fast(html: &str) -> String {
-    let no_tags = TAGS_RE.replace_all(html, " ");
-    squeeze_ws(no_tags.trim())
-}
-
-fn squeeze_ws(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_space = false;
-    for ch in s.chars() {
-        if ch.is_whitespace() {
-            if !prev_space {
-                out.push(' ');
-                prev_space = true;
-            }
-        } else {
-            out.push(ch);
-            prev_space = false;
-        }
-    }
-    out
-}
-
-// char-safe chunker
-fn make_chunk(lines: &[String], max_chars: usize) -> String {
-    let mut cur = String::new();
-    for l in lines {
-        if cur.len() + l.len() + 1 > max_chars {
-            // add as many chars as fit, on a UTF-8 boundary
-            let remain = max_chars.saturating_sub(cur.len());
-            if remain > 0 {
-                cur.push_str(&take_prefix_chars(l, remain));
-            }
-            break;
-        }
-        if !l.is_empty() {
-            cur.push_str(l);
-            cur.push('\n');
-        }
-    }
-    cur
-}
-
-fn take_prefix_chars(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut cut = 0usize;
-    for (idx, _) in s.char_indices() {
-        if idx <= max {
-            cut = idx;
-        } else {
-            break;
-        }
-    }
-    s[..cut].to_string()
-}
-
 fn build_prompt(topic_title: &str, chunk: &str) -> String {
     format!(
         "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---\n\n\
@@ -451,16 +391,4 @@ async fn summarize_with_ollama(
 
     let (summary, out_tok) = retry(backoff, op).await?;
     Ok((summary, in_tok, out_tok))
-}
-
-/* ---------------- Utils ---------------- */
-
-fn prompt_hash(topic_id: i64, model: &str, prompt: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(model.as_bytes());
-    h.update(b"\n");
-    h.update(topic_id.to_be_bytes());
-    h.update(b"\n");
-    h.update(prompt.as_bytes());
-    format!("{:x}", h.finalize())
 }

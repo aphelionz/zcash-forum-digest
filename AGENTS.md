@@ -153,6 +153,12 @@ graph TD
 
 **Exit hook:** `teardown` runs when leaving nix develop.
 
+## 8) CI
+
+**Purpose:** Lint and test on pushes and PRs.
+
+**Workflow:** `.github/workflows/ci.yml` runs `cargo fmt --all -- --check`, `cargo clippy --all-features --lib -- -D warnings`, and `cargo nextest run --all-features --lib`.
+
 ## Configuration
 
 **Environment variables**
