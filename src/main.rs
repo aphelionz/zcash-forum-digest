@@ -316,7 +316,6 @@ async fn summarize_with_ollama(
         .map(|m| BPE.encode_with_special_tokens(m.content).len())
         .sum();
 
-    let bpe_out = BPE.clone();
     let url_clone = url.clone();
     let body_clone = body.clone();
 
@@ -325,7 +324,6 @@ async fn summarize_with_ollama(
         ..Default::default()
     };
     let op = move || {
-        let bpe = bpe_out.clone();
         let url = url_clone.clone();
         let body = body_clone.clone();
         async move {
@@ -349,7 +347,7 @@ async fn summarize_with_ollama(
                 .map_err(|e| backoff::Error::transient(anyhow!("decode: {e:?}")))?;
 
             let raw = r.message.content;
-            let out_tok = bpe.encode_with_special_tokens(&raw).len();
+            let out_tok = BPE.encode_with_special_tokens(&raw).len();
             let summary: Summary = serde_json::from_str(&raw)
                 .map_err(|e| backoff::Error::transient(anyhow!("json: {e:?} raw: {raw}")))?;
 
