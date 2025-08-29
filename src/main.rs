@@ -230,7 +230,7 @@ async fn fetch_topic(client: &Client, id: u64) -> Result<TopicFull> {
 
 /* ---------------- Text prep ---------------- */
 
-async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
+pub async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String>> {
     let rows = query(
         r#"SELECT id, created_at, cooked FROM posts WHERE topic_id = $1 ORDER BY created_at ASC LIMIT $2"#,
     )
