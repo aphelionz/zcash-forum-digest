@@ -109,7 +109,7 @@ graph TD
 ## Configuration
 Environment variables:
 - `DATABASE_URL`: Postgres connection string
-- `LLM_MODEL`: Ollama model tag (default `qwen2.5:latest`; build `zc-forum-summarizer` from `Modelfile` for tuned prompts)
+- `LLM_MODEL`: Ollama model tag (default: `qwen2.5:latest`. For tuned prompts, it is recommended to build and use `zc-forum-summarizer` from the provided `Modelfile`.)
 - `OLLAMA_BASE_URL`: base URL for the Ollama API (default `http://127.0.0.1:11434`)
 
 The `Modelfile` embeds the system prompt and default runtime parameters. Adjust it to tweak
