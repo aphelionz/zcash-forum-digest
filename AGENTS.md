@@ -168,6 +168,7 @@ It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across
 * `DATABASE_URL=postgres://...`
 * `LLM_MODEL=qwen2.5:latest`
 * `OLLAMA_BASE_URL=http://127.0.0.1:11434` (or custom port)
+* `OLLAMA_MAX_ELAPSED_SECS=120` (optional retry timeout override)
 
 **Runtime knobs (Ollama options):** set in `Modelfile` (`temperature=0.2`, `num_ctx=8192`, `top_p=0.9`, `repeat_penalty=1.05`); requests use `keep_alive="5m"`.
 
