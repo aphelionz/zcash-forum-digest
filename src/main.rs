@@ -1,12 +1,14 @@
-use anyhow::{Result, anyhow};
-use backoff::{ExponentialBackoff, future::retry};
+use anyhow::Result;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::{PgPool, Row, query};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
-use zc_forum_etl::{BPE, make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast};
+use zc_forum_etl::{
+    BPE, make_chunk, posts_changed_since_last_llm, prompt_hash, strip_tags_fast,
+    summarize_with_ollama,
+};
 
 const MAX_POSTS_FOR_CHUNK: usize = 200; // first-page only (vertical slice)
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
@@ -232,104 +234,4 @@ fn build_prompt(topic_title: &str, chunk: &str) -> String {
         title = topic_title,
         body = chunk
     )
-}
-
-/* ---------------- Ollama client (/api/chat) ---------------- */
-
-#[derive(Serialize, Clone)]
-struct Msg<'a> {
-    role: &'a str,
-    content: &'a str,
-}
-
-#[derive(Serialize, Clone)]
-struct ChatReq<'a> {
-    model: &'a str,
-    stream: bool,
-    messages: Vec<Msg<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    keep_alive: Option<&'a str>, // keep model in memory for a bit
-}
-
-#[derive(Deserialize)]
-struct ChatResp {
-    message: ChatMsg,
-}
-#[derive(Deserialize)]
-struct ChatMsg {
-    content: String, /* role: String */
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Summary {
-    headline: String,
-    bullets: Vec<String>,
-    citations: Vec<String>,
-}
-
-async fn summarize_with_ollama(
-    client: &Client,
-    base: &str,
-    model: &str,
-    prompt: &str,
-) -> Result<(Summary, usize, usize)> {
-    let url = format!("{}/api/chat", base.trim_end_matches('/'));
-
-    let body = ChatReq {
-        model,
-        stream: false,
-        keep_alive: Some("5m"),
-        messages: vec![Msg {
-            role: "user",
-            content: prompt,
-        }],
-    };
-
-    let in_tok: usize = body
-        .messages
-        .iter()
-        .map(|m| BPE.encode_with_special_tokens(m.content).len())
-        .sum();
-
-    let url_clone = url.clone();
-    let body_clone = body.clone();
-
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(Duration::from_secs(120)),
-        ..Default::default()
-    };
-    let op = move || {
-        let url = url_clone.clone();
-        let body = body_clone.clone();
-        async move {
-            // send; treat connection/send/parse problems as transient
-            let resp = client
-                .post(&url)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| backoff::Error::transient(anyhow!("transport: {e:?}")))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                return Err(backoff::Error::transient(anyhow!("http {status}: {text}")));
-            }
-
-            let r: ChatResp = resp
-                .json()
-                .await
-                .map_err(|e| backoff::Error::transient(anyhow!("decode: {e:?}")))?;
-
-            let raw = r.message.content;
-            let out_tok = BPE.encode_with_special_tokens(&raw).len();
-            let summary: Summary = serde_json::from_str(&raw)
-                .map_err(|e| backoff::Error::transient(anyhow!("json: {e:?} raw: {raw}")))?;
-
-            Ok::<(Summary, usize), backoff::Error<anyhow::Error>>((summary, out_tok))
-        }
-    };
-
-    let (summary, out_tok) = retry(backoff, op).await?;
-    Ok((summary, in_tok, out_tok))
 }

@@ -6,6 +6,9 @@ use sqlx::{PgPool, query_scalar};
 use tiktoken_rs::{CoreBPE, cl100k_base};
 use time::OffsetDateTime;
 
+pub mod ollama;
+pub use ollama::{Summary, summarize_with_ollama};
+
 static TAGS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
 pub static BPE: Lazy<CoreBPE> =
     Lazy::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
