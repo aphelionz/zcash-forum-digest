@@ -31,6 +31,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89
+      - name: Install and start Ollama
+        run: |
+          curl -L https://ollama.ai/install.sh | sh
+          ollama serve >/tmp/ollama.log 2>&1 &
+          until curl -s http://127.0.0.1:11434/api/version >/dev/null; do
+            sleep 1
+          done
+      - name: Build Ollama model
+        run: |
+          ollama create zc-forum-summarizer -f Modelfile
+          ollama run zc-forum-summarizer -p "ping" >/tmp/ollama-warmup.log
       - name: Wait for DB
         run: |
           # Wait for PostgreSQL to become ready, with exponential backoff (max 60s)
@@ -49,7 +60,7 @@ jobs:
       - name: Run ETL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
-          LLM_MODEL: qwen2.5:latest
+          LLM_MODEL: zc-forum-summarizer
           OLLAMA_BASE_URL: http://127.0.0.1:11434
         run: |
           cargo run --release --bin zc-forum-etl
