@@ -63,7 +63,7 @@ graph TD
 
 ## 1) Fetcher
 
-**Purpose:** Pull latest topic list and first‑page posts from Discourse.
+**Purpose:** Pull latest topic list and all posts for each topic via pagination from Discourse.
 
 **Triggers:** On `zc-forum-etl` run.
 
@@ -78,6 +78,8 @@ graph TD
 **Failure Handling:** network errors → `error_for_status`; retries are simple (re-run process). Non‑fatal; logs via `tracing`.
 
 **Observability:** `INFO` counts (topics fetched, posts per topic).
+
+**Notes:** page requests pause for 1s to respect Discourse rate limits and stop when a page returns fewer than 20 posts or a 404.
 
 ## 2) Change Guard
 **Purpose:** Avoid redundant summarization.
@@ -97,7 +99,7 @@ graph TD
 **Logic:** HTML parsed via `html5ever` with entity decoding and `script/style` removal;
 whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
-**Limits:** ≤ 1.8k chars (char‑safe truncation).
+**Limits:** ≤ 1.8k chars (char‑safe truncation). Posts before the 24‑hour cutoff are summarized for context, and posts within the last 24 hours are summarized separately for the digest.
 
 ## 4) Summarizer (Local LLM)
 
@@ -112,7 +114,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 * System: embedded in `Modelfile` — technical note‑taker returning JSON.
 * User: thread title + excerpt with `[post:<id> @ <ts>]` lines.
-* Output: strict JSON `{headline, bullets[], citations[]}` stored verbatim in `topic_summaries_llm.summary`.
+* Output: strict JSON `{headline, bullets[], citations[]}` stored verbatim in `topic_summaries_llm.summary` and `topic_summaries_llm.recent_summary`.
 
 **Backoff/Timeout:** transport + parse errors are transient; 120s max elapsed.
 
@@ -120,7 +122,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Tokenization:** prompt and response tokens counted via `tiktoken-rs` using a globally cached `cl100k_base` encoder and stored as `input_tokens`/`output_tokens`.
 
-**Outputs → DB:** topic_summaries_llm(topic_id, summary, model, prompt_hash, input_tokens, output_tokens, updated_at).
+**Outputs → DB:** topic_summaries_llm(topic_id, summary, recent_summary, model, prompt_hash, input_tokens, output_tokens, updated_at).
 
 **Failure Handling:** timeout/HTTP error → warn and continue; JSON parse errors log the raw LLM output truncated to 200 chars with an ellipsis; process remains healthy.
 
@@ -129,7 +131,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 **Tables:**
 * `topics(id BIGINT PRIMARY KEY, title TEXT)`
 * `posts(id BIGINT PRIMARY KEY, topic_id BIGINT, username TEXT, cooked TEXT, created_at TIMESTAMPTZ)`
-* `topic_summaries_llm(topic_id PK, summary TEXT  -- JSON {headline, bullets, citations}, model TEXT, prompt_hash TEXT, input_tokens INT, output_tokens INT, cost_usd NUMERIC, updated_at TIMESTAMPTZ)`
+* `topic_summaries_llm(topic_id PK, summary TEXT, recent_summary TEXT, model TEXT, prompt_hash TEXT, input_tokens INT, output_tokens INT, cost_usd NUMERIC, updated_at TIMESTAMPTZ)`
 
 **Indexes:**
 * `posts(topic_id, created_at)`
@@ -186,8 +188,6 @@ It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across
 
 ## Roadmap (near‑term)
 
-**Pagination:** fetch all posts per topic; increase excerpt via map‑reduce.
-
 **Map‑Reduce Summaries:** chunk summaries → merge prompt; maintain citations.
 
 **Watermarking:** store `last_post_id` in LLM table; compare with MAX(posts.id).
@@ -208,7 +208,7 @@ Consider per‑provider allowlist if you later add remote LLMs.
 
 **Purpose:** Publish an HTML and RSS digest of forum topics updated in the last 24 hours.
 
-**Runtime:** The `digest` binary queries recent topics and writes both `public/index.html` and `public/rss.xml` with existing LLM summaries.
+**Runtime:** The `digest` binary queries recent topics, renders stored LLM summaries for context (posts older than 24 hours) and a second summary for posts from the last 24 hours. It writes both `public/index.html` and `public/rss.xml`.
 
 **Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page and RSS feed, and deploys them to GitHub Pages on a daily schedule or manual trigger.
 
