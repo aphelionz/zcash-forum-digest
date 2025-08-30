@@ -165,6 +165,36 @@ pub async fn load_plain_lines(pool: &PgPool, topic_id: i64) -> Result<Vec<String
     Ok(out)
 }
 
+pub async fn load_plain_lines_before(
+    pool: &PgPool,
+    topic_id: i64,
+    before: OffsetDateTime,
+) -> Result<Vec<String>> {
+    let rows = query(
+        r#"SELECT id, created_at, cooked FROM posts
+           WHERE topic_id = $1 AND created_at < $2
+           ORDER BY created_at ASC LIMIT $3"#,
+    )
+    .bind(topic_id)
+    .bind(before)
+    .bind(MAX_POSTS_FOR_CHUNK as i64)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let cooked: String = r.get("cooked");
+        let id: i64 = r.get("id");
+        let created_at: OffsetDateTime = r.get("created_at");
+        let t = strip_tags_fast(&cooked);
+        if !t.is_empty() {
+            let ts = created_at.format(&Rfc3339)?;
+            out.push(format!("[post:{id} @ {ts}] {t}"));
+        }
+    }
+    Ok(out)
+}
+
 pub fn prompt_hash(topic_id: i64, model: &str, prompt: &str) -> String {
     let mut h = Sha256::new();
     h.update(model.as_bytes());

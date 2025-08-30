@@ -3,11 +3,12 @@ use futures::{StreamExt, stream};
 use reqwest::Client;
 use serde::Deserialize;
 use sqlx::{PgPool, query};
-use time::OffsetDateTime;
+use time::{Duration as StdDuration, OffsetDateTime};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
 use zc_forum_etl::{
-    load_plain_lines, make_chunk, posts_changed_since_last_llm, prompt_hash, summarize_with_ollama,
+    load_plain_lines_before, make_chunk, posts_changed_since_last_llm, prompt_hash,
+    summarize_with_ollama,
 };
 
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
@@ -120,30 +121,38 @@ async fn process_topic(
     .execute(&pool)
     .await?;
 
-    // Fetch first page of posts for this topic
-    let full = fetch_topic(&client, topic.id).await?;
-    info!("Topic {} → {} posts", full.id, full.post_stream.posts.len());
+    // Fetch all pages of posts for this topic
+    let mut page: u32 = 0;
+    loop {
+        let full = fetch_topic_page(&client, topic.id, page).await?;
+        let count = full.post_stream.posts.len();
+        if count == 0 {
+            break;
+        }
+        info!("Topic {} page {} → {} posts", topic.id, page, count);
 
-    // Upsert posts
-    for p in full.post_stream.posts {
-        query!(
-            r#"
-            INSERT INTO posts (id, topic_id, username, cooked, created_at)
-            VALUES ($1,$2,$3,$4,$5)
-            ON CONFLICT (id) DO UPDATE SET
-              topic_id = EXCLUDED.topic_id,
-              username = EXCLUDED.username,
-              cooked = EXCLUDED.cooked,
-              created_at = EXCLUDED.created_at
-            "#,
-            p.id as i64,
-            p.topic_id as i64,
-            p.username,
-            p.cooked,
-            p.created_at
-        )
-        .execute(&pool)
-        .await?;
+        for p in full.post_stream.posts {
+            query!(
+                r#"
+                INSERT INTO posts (id, topic_id, username, cooked, created_at)
+                VALUES ($1,$2,$3,$4,$5)
+                ON CONFLICT (id) DO UPDATE SET
+                  topic_id = EXCLUDED.topic_id,
+                  username = EXCLUDED.username,
+                  cooked = EXCLUDED.cooked,
+                  created_at = EXCLUDED.created_at
+                "#,
+                p.id as i64,
+                p.topic_id as i64,
+                p.username,
+                p.cooked,
+                p.created_at
+            )
+            .execute(&pool)
+            .await?;
+        }
+
+        page += 1;
     }
 
     // Skip if no new posts since last LLM summary
@@ -152,8 +161,9 @@ async fn process_topic(
         return Ok(());
     }
 
-    // Build compact chunk from first-page posts
-    let lines = load_plain_lines(&pool, topic.id as i64).await?;
+    // Build compact chunk from posts before cutoff
+    let cutoff = OffsetDateTime::now_utc() - StdDuration::hours(24);
+    let lines = load_plain_lines_before(&pool, topic.id as i64, cutoff).await?;
     if lines.is_empty() {
         return Ok(());
     }
@@ -221,8 +231,15 @@ async fn fetch_latest(client: &Client) -> Result<Latest> {
 }
 
 #[instrument(skip(client))]
-async fn fetch_topic(client: &Client, id: u64) -> Result<TopicFull> {
-    let url = format!("https://forum.zcashcommunity.com/t/{}.json", id);
+async fn fetch_topic_page(client: &Client, id: u64, page: u32) -> Result<TopicFull> {
+    let url = if page == 0 {
+        format!("https://forum.zcashcommunity.com/t/{}.json", id)
+    } else {
+        format!(
+            "https://forum.zcashcommunity.com/t/{}.json?page={}",
+            id, page
+        )
+    };
     Ok(client
         .get(&url)
         .send()

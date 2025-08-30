@@ -3,6 +3,7 @@ use rss::{ChannelBuilder, ItemBuilder};
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use time::{OffsetDateTime, format_description::well_known::Rfc2822};
+use zc_forum_etl::strip_tags_fast;
 
 #[derive(Deserialize)]
 struct LlmSummary {
@@ -42,20 +43,46 @@ async fn main() -> Result<()> {
         html.push_str(&format!("<h2>{}</h2>", title));
 
         let mut desc = String::new();
+
         if let Some(js) = summary_json {
             if let Ok(s) = serde_json::from_str::<LlmSummary>(&js) {
+                let mut ctx = s.headline;
                 if !s.bullets.is_empty() {
-                    html.push_str("<ul>");
-                    for b in s.bullets {
-                        html.push_str(&format!("<li>{}</li>", b));
-                        if !desc.is_empty() {
-                            desc.push_str(" \u{2022} ");
-                        }
-                        desc.push_str(&b);
+                    if !ctx.is_empty() {
+                        ctx.push(' ');
                     }
-                    html.push_str("</ul>");
+                    ctx.push_str(&s.bullets.join(" "));
+                }
+                if !ctx.is_empty() {
+                    html.push_str(&format!("<p>{}</p>", ctx));
+                    desc.push_str(&ctx);
                 }
             }
+        }
+
+        // recent posts in last 24 hours
+        let recent = sqlx::query(
+            r#"SELECT username, cooked, created_at FROM posts
+               WHERE topic_id = $1 AND created_at >= now() - interval '1 day'
+               ORDER BY created_at ASC"#,
+        )
+        .bind(id)
+        .fetch_all(&pool)
+        .await?;
+
+        if !recent.is_empty() {
+            html.push_str("<h3>Last 24h</h3><ul>");
+            for rp in recent {
+                let username: String = rp.get("username");
+                let cooked: String = rp.get("cooked");
+                let text = strip_tags_fast(&cooked);
+                html.push_str(&format!("<li><b>{}</b>: {}</li>", username, text));
+                if !desc.is_empty() {
+                    desc.push_str(" \u{2022} ");
+                }
+                desc.push_str(&format!("{}: {}", username, text));
+            }
+            html.push_str("</ul>");
         }
 
         let pub_date = last_post.format(&Rfc2822)?;

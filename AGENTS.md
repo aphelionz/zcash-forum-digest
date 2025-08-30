@@ -63,7 +63,7 @@ graph TD
 
 ## 1) Fetcher
 
-**Purpose:** Pull latest topic list and first‑page posts from Discourse.
+**Purpose:** Pull latest topic list and all posts for each topic via pagination from Discourse.
 
 **Triggers:** On `zc-forum-etl` run.
 
@@ -97,7 +97,7 @@ graph TD
 **Logic:** HTML parsed via `html5ever` with entity decoding and `script/style` removal;
 whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
-**Limits:** ≤ 1.8k chars (char‑safe truncation).
+**Limits:** ≤ 1.8k chars (char‑safe truncation). Only posts older than 24 hours are summarized to provide context.
 
 ## 4) Summarizer (Local LLM)
 
@@ -186,8 +186,6 @@ It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across
 
 ## Roadmap (near‑term)
 
-**Pagination:** fetch all posts per topic; increase excerpt via map‑reduce.
-
 **Map‑Reduce Summaries:** chunk summaries → merge prompt; maintain citations.
 
 **Watermarking:** store `last_post_id` in LLM table; compare with MAX(posts.id).
@@ -208,7 +206,7 @@ Consider per‑provider allowlist if you later add remote LLMs.
 
 **Purpose:** Publish an HTML and RSS digest of forum topics updated in the last 24 hours.
 
-**Runtime:** The `digest` binary queries recent topics and writes both `public/index.html` and `public/rss.xml` with existing LLM summaries.
+**Runtime:** The `digest` binary queries recent topics, renders stored LLM summaries for context (posts older than 24 hours), and lists all posts from the last 24 hours. It writes both `public/index.html` and `public/rss.xml`.
 
 **Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page and RSS feed, and deploys them to GitHub Pages on a daily schedule or manual trigger.
 
