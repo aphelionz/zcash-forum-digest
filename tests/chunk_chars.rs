@@ -2,7 +2,7 @@ use zc_forum_etl::{make_chunk, take_prefix_chars};
 
 #[test]
 fn take_prefix_chars_handles_multibyte() {
-    let s = "é😊ño"; // 4 characters
+    let s = "é😊ño"; // 4 characters: 'é', '😊', 'ñ', 'o'
     assert_eq!(take_prefix_chars(s, 2), "é😊");
 }
 
