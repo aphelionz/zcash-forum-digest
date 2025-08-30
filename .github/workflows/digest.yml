@@ -33,7 +33,7 @@ jobs:
           toolchain: 1.89
       - name: Wait for DB
         run: |
-          done
+          sleep 2
           if ! pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
             echo "Error: PostgreSQL did not become ready in time." >&2
             exit 1
