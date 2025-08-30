@@ -12,7 +12,7 @@ use zc_forum_etl::{
 
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
 const SUM_TIMEOUT_SECS: u64 = 240; // wrap around our own retry/HTTP timeouts
-const TOPIC_CONCURRENCY: usize = 5; // limit concurrent topic processing
+const TOPIC_CONCURRENCY: usize = 1; // process topics sequentially to avoid CI timeouts
 
 const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
 
@@ -81,6 +81,8 @@ async fn main() -> Result<()> {
     info!("Fetched {} topics", latest.topic_list.topics.len());
 
     let topics = latest.topic_list.topics;
+    // Sequential processing keeps CI runs within timeouts. Adjust
+    // `TOPIC_CONCURRENCY` if parallelism is desired locally.
     stream::iter(topics.into_iter())
         .map(|topic| {
             let client = client.clone();
