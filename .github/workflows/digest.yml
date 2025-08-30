@@ -31,6 +31,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89
+      - uses: actions/cache@v3
+        id: cache-ollama
+        with:
+          path: ~/.ollama/models
+          key: ollama-${{ hashFiles('Modelfile') }}
       - name: Install and start Ollama
         run: |
           curl -L https://ollama.ai/install.sh | sh
@@ -39,6 +44,7 @@ jobs:
             sleep 1
           done
       - name: Build Ollama model
+        if: steps.cache-ollama.outputs.cache-hit != 'true'
         run: |
           ollama create zc-forum-summarizer -f Modelfile
           ollama run zc-forum-summarizer "ping" >/tmp/ollama-warmup.log

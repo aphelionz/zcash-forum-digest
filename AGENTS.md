@@ -159,7 +159,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Purpose:** Lint and test on pushes and PRs.
 
-**Workflow:** `.github/workflows/ci.yml` runs `cargo fmt --all -- --check`, `cargo clippy --all-features --lib -- -D warnings`, and `cargo nextest run --all-features --lib`.
+**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, caches and (if needed) builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
 It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across runs.
 
 ## Configuration
