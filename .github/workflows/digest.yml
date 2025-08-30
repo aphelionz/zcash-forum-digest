@@ -13,17 +13,31 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zc_forum
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89
-      - name: Install Postgres
-        run: sudo apt-get update && sudo apt-get install -y postgresql
-      - name: Start Postgres
-        run: sudo service postgresql start
-      - name: Create database
-        run: sudo -u postgres createdb zc_forum || true
+      - name: Wait for DB
+        run: |
+          done
+          if ! pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
+            echo "Error: PostgreSQL did not become ready in time." >&2
+            exit 1
+          fi
       - name: Run ETL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
