@@ -209,5 +209,5 @@ Consider per‑provider allowlist if you later add remote LLMs.
 
 **Runtime:** The `digest` binary queries recent topics and writes `public/index.html` with existing LLM summaries.
 
-**Workflow:** `.github/workflows/digest.yml` runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
+**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
 
