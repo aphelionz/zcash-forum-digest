@@ -130,11 +130,12 @@ async fn process_topic(
         let full = match fetch_topic_page(&client, topic.id, page).await {
             Ok(f) => f,
             Err(e) => {
-                if e.status() == Some(StatusCode::NOT_FOUND) {
-                    break;
-                } else {
-                    return Err(e.into());
+                if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
+                    if req_err.status() == Some(StatusCode::NOT_FOUND) {
+                        break;
+                    }
                 }
+                return Err(e);
             }
         };
         let count = full.post_stream.posts.len();
