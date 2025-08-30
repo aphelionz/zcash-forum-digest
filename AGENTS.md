@@ -206,9 +206,9 @@ Consider per‑provider allowlist if you later add remote LLMs.
 
 ## 9) Daily Digest
 
-**Purpose:** Publish an HTML digest of forum topics updated in the last 24 hours.
+**Purpose:** Publish an HTML and RSS digest of forum topics updated in the last 24 hours.
 
-**Runtime:** The `digest` binary queries recent topics and writes `public/index.html` with existing LLM summaries.
+**Runtime:** The `digest` binary queries recent topics and writes both `public/index.html` and `public/rss.xml` with existing LLM summaries.
 
-**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
+**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page and RSS feed, and deploys them to GitHub Pages on a daily schedule or manual trigger.
 

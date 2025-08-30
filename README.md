@@ -1,6 +1,6 @@
 # Zcash Forum Digest _(zc-forum-etl)_
 
-Local-first ETL and summarization pipeline for the Zcash Community Forum.
+Local-first ETL and summarization pipeline for the Zcash Community Forum. It also generates a daily HTML and RSS digest of recent topics for publishing via GitHub Pages.
 
 ## Table of Contents
 - [Background](#background)
