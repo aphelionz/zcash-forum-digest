@@ -1,0 +1,53 @@
+name: Daily Digest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89
+      - name: Install Postgres
+        run: sudo apt-get update && sudo apt-get install -y postgresql
+      - name: Start Postgres
+        run: sudo service postgresql start
+      - name: Create database
+        run: sudo -u postgres createdb zc_forum || true
+      - name: Run ETL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
+          LLM_MODEL: qwen2.5:latest
+          OLLAMA_BASE_URL: http://127.0.0.1:11434
+        run: |
+          cargo run --release
+      - name: Generate digest
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
+        run: cargo run --release --bin digest
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

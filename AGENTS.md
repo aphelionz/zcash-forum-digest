@@ -202,3 +202,12 @@ Local inference by default (Ollama). No user secrets in prompts.
 Only public forum content is processed; avoid logging raw post bodies at `INFO`.
 
 Consider per‑provider allowlist if you later add remote LLMs.
+
+## 9) Daily Digest
+
+**Purpose:** Publish an HTML digest of forum topics updated in the last 24 hours.
+
+**Runtime:** The `digest` binary queries recent topics and writes `public/index.html` with existing LLM summaries.
+
+**Workflow:** `.github/workflows/digest.yml` runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
+
