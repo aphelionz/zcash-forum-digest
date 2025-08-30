@@ -33,10 +33,11 @@ jobs:
           toolchain: 1.89
       - name: Wait for DB
         run: |
-          for i in {1..30}; do
-            pg_isready -h 127.0.0.1 -p 5432 -U postgres && break
-            sleep 1
           done
+          if ! pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
+            echo "Error: PostgreSQL did not become ready in time." >&2
+            exit 1
+          fi
       - name: Run ETL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
