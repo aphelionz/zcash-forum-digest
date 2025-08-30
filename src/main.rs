@@ -11,7 +11,7 @@ use zc_forum_etl::{
 };
 
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
-const SUM_TIMEOUT_SECS: u64 = 120; // wrap around our own retry/HTTP timeouts
+const SUM_TIMEOUT_SECS: u64 = 240; // wrap around our own retry/HTTP timeouts
 const TOPIC_CONCURRENCY: usize = 5; // limit concurrent topic processing
 
 const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
