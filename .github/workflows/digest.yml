@@ -41,7 +41,7 @@ jobs:
       - name: Build Ollama model
         run: |
           ollama create zc-forum-summarizer -f Modelfile
-          ollama run zc-forum-summarizer -p "ping" >/tmp/ollama-warmup.log
+          ollama run zc-forum-summarizer "ping" >/tmp/ollama-warmup.log
       - name: Wait for DB
         run: |
           # Wait for PostgreSQL to become ready, with exponential backoff (max 60s)
