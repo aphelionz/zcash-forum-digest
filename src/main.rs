@@ -1,6 +1,6 @@
 use anyhow::Result;
 use futures::{StreamExt, stream};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use sqlx::{PgPool, query};
 use time::{Duration as StdDuration, OffsetDateTime};
@@ -124,7 +124,19 @@ async fn process_topic(
     // Fetch all pages of posts for this topic
     let mut page: u32 = 0;
     loop {
-        let full = fetch_topic_page(&client, topic.id, page).await?;
+        if page > 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        let full = match fetch_topic_page(&client, topic.id, page).await {
+            Ok(f) => f,
+            Err(e) => {
+                if e.status() == Some(StatusCode::NOT_FOUND) {
+                    break;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        };
         let count = full.post_stream.posts.len();
         if count == 0 {
             break;
@@ -152,6 +164,9 @@ async fn process_topic(
             .await?;
         }
 
+        if count < 20 {
+            break;
+        }
         page += 1;
     }
 

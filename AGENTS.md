@@ -79,6 +79,8 @@ graph TD
 
 **Observability:** `INFO` counts (topics fetched, posts per topic).
 
+**Notes:** page requests pause for 1s to respect Discourse rate limits and stop when a page returns fewer than 20 posts or a 404.
+
 ## 2) Change Guard
 **Purpose:** Avoid redundant summarization.
 
