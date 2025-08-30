@@ -116,6 +116,9 @@ Environment variables:
 - `LLM_MODEL`: Ollama model tag (default: `qwen2.5:latest`. For tuned prompts, it is recommended to build and use `zc-forum-summarizer` from the provided `Modelfile`.)
 - `OLLAMA_BASE_URL`: base URL for the Ollama API (default `http://127.0.0.1:11434`)
 
+The ETL processes topics sequentially to avoid timeouts on GitHub Actions.
+Adjust `TOPIC_CONCURRENCY` in `src/main.rs` if you need more parallelism locally.
+
 The `Modelfile` embeds the system prompt and default runtime parameters. Adjust it to tweak
 `temperature`, `num_ctx`, or other options and recreate the model. Requests send only the
 thread excerpt; formatting rules live in the model.
