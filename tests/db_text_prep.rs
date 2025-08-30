@@ -55,7 +55,7 @@ async fn load_plain_lines_orders_and_strips(pool: PgPool) -> Result<()> {
 
     // optional: ensure chunking respects length limit
     let chunk = make_chunk(&lines, 80);
-    assert!(chunk.len() <= 80);
+    assert!(chunk.chars().count() <= 80);
 
     // ensure actual timestamps in formatted string
     let ts_old = t_old.format(&Rfc3339)?;

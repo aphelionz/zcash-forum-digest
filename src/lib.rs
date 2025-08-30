@@ -113,26 +113,21 @@ pub fn squeeze_ws(s: &str) -> String {
     out
 }
 
-pub fn take_prefix_chars(s: &str, max: usize) -> String {
-    if s.len() <= max {
+pub fn take_prefix_chars(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
         return s.to_string();
     }
-    let mut cut = 0usize;
-    for (idx, _) in s.char_indices() {
-        if idx <= max {
-            cut = idx;
-        } else {
-            break;
-        }
-    }
-    s[..cut].to_string()
+    s.chars().take(max_chars).collect()
 }
 
 pub fn make_chunk(lines: &[String], max_chars: usize) -> String {
     let mut cur = String::new();
+    let mut cur_chars = 0usize;
     for l in lines {
-        if cur.len() + l.len() + 1 > max_chars {
-            let remain = max_chars.saturating_sub(cur.len());
+        let l_chars = l.chars().count();
+        if cur_chars + l_chars + 1 > max_chars {
+            let remain = max_chars.saturating_sub(cur_chars);
             if remain > 0 {
                 cur.push_str(&take_prefix_chars(l, remain));
             }
@@ -141,6 +136,7 @@ pub fn make_chunk(lines: &[String], max_chars: usize) -> String {
         if !l.is_empty() {
             cur.push_str(l);
             cur.push('\n');
+            cur_chars += l_chars + 1; // account for newline
         }
     }
     cur
@@ -225,8 +221,8 @@ mod tests {
 
     #[test]
     fn take_prefix_chars_handles_utf8_boundaries() {
-        assert_eq!(take_prefix_chars("a🐱b", 5), "a🐱");
-        assert_eq!(take_prefix_chars("a🐱b", 3), "a");
+        assert_eq!(take_prefix_chars("a🐱b", 2), "a🐱");
+        assert_eq!(take_prefix_chars("a🐱b", 1), "a");
     }
 
     #[test]
