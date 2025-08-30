@@ -30,7 +30,7 @@ jobs:
           LLM_MODEL: qwen2.5:latest
           OLLAMA_BASE_URL: http://127.0.0.1:11434
         run: |
-          cargo run --release || true
+          cargo run --release
       - name: Generate digest
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
