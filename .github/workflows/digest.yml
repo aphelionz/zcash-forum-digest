@@ -40,10 +40,12 @@ jobs:
             fi
             sleep $((2 ** i))
           done
-          if ! pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
-            echo "Error: PostgreSQL did not become ready in time." >&2
-            exit 1
-          fi
+      - name: Database migrations with sqlx
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres,runtime-tokio-rustls
+          sqlx migrate run
       - name: Run ETL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/zc_forum
