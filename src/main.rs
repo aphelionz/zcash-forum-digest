@@ -36,8 +36,6 @@ struct TopicStub {
 
 #[derive(Deserialize)]
 struct TopicFull {
-    id: u64,
-    title: String,
     post_stream: PostStream,
 }
 
@@ -49,8 +47,6 @@ struct PostStream {
 #[derive(Deserialize, Clone)]
 struct Post {
     id: u64,
-    topic_id: u64,
-    username: String,
     cooked: String,
     #[serde(with = "time::serde::rfc3339")]
     created_at: OffsetDateTime,
