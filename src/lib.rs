@@ -1,13 +1,13 @@
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tiktoken_rs::{CoreBPE, cl100k_base};
 
 pub mod ollama;
 pub use ollama::{Summary, summarize_with_ollama};
 
-pub static BPE: Lazy<CoreBPE> =
-    Lazy::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
+pub static BPE: LazyLock<CoreBPE> =
+    LazyLock::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
 
 /// Strip HTML tags, decode entities, and drop script/style blocks.
 pub fn strip_tags_fast(html: &str) -> String {

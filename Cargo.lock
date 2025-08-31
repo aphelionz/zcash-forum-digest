@@ -2422,7 +2422,6 @@ dependencies = [
  "backoff",
  "html5ever",
  "markup5ever_rcdom",
- "once_cell",
  "regex",
  "reqwest",
  "rss",
