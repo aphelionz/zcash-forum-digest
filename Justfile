@@ -44,7 +44,7 @@ cov:
         cargo llvm-cov clean --workspace
         cargo llvm-cov --all-features --workspace --lcov --output-path target/lcov.info
 
-startup: ollama-start grip-start
+startup:
   @echo "Startup complete"
 
 teardown: ollama-stop grip-stop
