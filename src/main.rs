@@ -16,6 +16,7 @@ const CHUNK_MAX_CHARS: usize = 1_800;
 const SUM_TIMEOUT_SECS: u64 = 240;
 const PAGE_SIZE: usize = 20;
 const MAX_POSTS_FOR_CHUNK: usize = 200;
+const CUTOFF_HOURS: i64 = 24;
 
 #[derive(Deserialize)]
 struct Latest {
@@ -86,7 +87,7 @@ async fn main() -> Result<()> {
     ));
 
     let mut items = Vec::new();
-    let cutoff = OffsetDateTime::now_utc() - Duration::hours(24);
+    let cutoff = OffsetDateTime::now_utc() - Duration::hours(CUTOFF_HOURS);
 
     for stub in latest.topic_list.topics {
         let posts = fetch_posts(&client, stub.id, cutoff).await?;
