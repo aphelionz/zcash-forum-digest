@@ -1,2 +1,4 @@
 .nix
 target
+public/index.html
+public/rss.xml
