@@ -189,6 +189,40 @@ pub fn compose_digest_item(
     }
 }
 
+/// Remove any `[post:ID]` annotations the model might echo from the prompt.
+///
+/// The model is instructed not to emit these tags, but this function provides a
+/// final safeguard by stripping them from the summary while preserving
+/// newlines.
+pub fn strip_post_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut temp = chars.clone();
+            if temp.next() == Some('p')
+                && temp.next() == Some('o')
+                && temp.next() == Some('s')
+                && temp.next() == Some('t')
+                && temp.next() == Some(':')
+            {
+                // Skip until closing bracket
+                for c2 in chars.by_ref() {
+                    if c2 == ']' {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out.lines()
+        .map(|l| squeeze_ws(l).trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -40,7 +40,7 @@ graph TD
 * **Timeouts/Backoff:** HTTP 120s total; exponential backoff for LLM calls; outer task timeout 120s
 * **Concurrency:** topics are processed sequentially (TOPIC_CONCURRENCY = 1) to stay within GitHub Actions timeouts
 * **Chunking:** first‑page posts only (vertical slice), char‑safe chunk ≤ 1.8k
-* **Summaries:** LLM returns plain text only. All IDs, timestamps, authors, and URLs come directly from the forum API; links are built from IDs via `build_post_url`.
+* **Summaries:** LLM returns plain text only. All IDs, timestamps, authors, and URLs come directly from the forum API; links are built from IDs via `build_post_url`. Any `[post:ID]` markers echoed by the model are stripped before output.
 
 # Agents
 
@@ -73,7 +73,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 ## 3) Summarizer (Local LLM)
 
-**Purpose:** Create concise, factual summaries with citations.
+**Purpose:** Create concise, factual summaries.
 
 **Runtime:** Ollama → `/api/chat` with keep_alive: "5m"; model from `LLM_MODEL`
 (`zc-forum-summarizer` built from `Modelfile` by default).
@@ -82,9 +82,9 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Prompt:**
 
-* System: embedded in `Modelfile` — technical note‑taker returning JSON.
+* System: embedded in `Modelfile` or sent at runtime — technical note‑taker returning plain text.
 * User: thread title + excerpt with `[post:<id> @ <ts>]` lines.
-* Output: strict JSON `{headline, bullets[], citations[]}` stored verbatim in `topic_summaries_llm.summary` and `topic_summaries_llm.recent_summary`.
+* Output: headline + `- ` bullets as plain text. Any `[post:ID]` markers are stripped before rendering.
 
 **Backoff/Timeout:** transport + parse errors are transient; 120s max elapsed.
 
@@ -94,7 +94,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Outputs:** summaries are used immediately to build HTML and RSS output, then discarded.
 
-**Failure Handling:** timeout/HTTP error → warn and continue; JSON parse errors log the raw LLM output truncated to 200 chars with an ellipsis; process remains healthy.
+**Failure Handling:** timeout/HTTP error → warn and continue; the process remains healthy.
 
 ## 4) Dev Shell & Helpers
 

@@ -7,7 +7,9 @@ use serde::Deserialize;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc2822};
 use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
-use zc_forum_etl::{compose_digest_item, posts_to_chunk, summarize_with_ollama, Post};
+use zc_forum_etl::{
+    Post, compose_digest_item, posts_to_chunk, strip_post_tags, summarize_with_ollama,
+};
 
 const CHUNK_MAX_CHARS: usize = 1_800;
 const SUM_TIMEOUT_SECS: u64 = 240;
@@ -80,10 +82,7 @@ async fn main() -> Result<()> {
         if posts.is_empty() {
             continue;
         }
-        let last_post = posts
-            .iter()
-            .max_by_key(|p| p.created_at)
-            .unwrap();
+        let last_post = posts.iter().max_by_key(|p| p.created_at).unwrap();
 
         let chunk = posts_to_chunk(posts.iter().take(MAX_POSTS_FOR_CHUNK), CHUNK_MAX_CHARS);
 
@@ -96,7 +95,7 @@ async fn main() -> Result<()> {
             )
             .await
             {
-                Ok(Ok((s, _, _))) => summary = s,
+                Ok(Ok((s, _, _))) => summary = strip_post_tags(&s),
                 Ok(Err(e)) => warn!("LLM summarize failed for {}: {e}", stub.id),
                 Err(_) => warn!("LLM summarize timed out for {}", stub.id),
             }

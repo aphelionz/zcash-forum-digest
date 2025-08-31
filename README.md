@@ -99,7 +99,8 @@ $ cargo nextest run --all-features --lib
 The LLM is used **only** to summarize post content. All metadata—IDs,
 timestamps, authors, and titles—comes directly from the forum API and passes
 through unchanged. Links are built from topic and post IDs via the
-`build_post_url` helper.
+`build_post_url` helper. Any `[post:ID]` tags used in prompts are stripped from
+the final summaries.
 
 Example item:
 

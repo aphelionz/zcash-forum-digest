@@ -1,5 +1,5 @@
 use std::fs;
-use zc_forum_etl::{compose_digest_item, Post};
+use zc_forum_etl::{Post, compose_digest_item};
 
 #[test]
 fn merges_metadata_with_summary() {
@@ -20,7 +20,13 @@ fn merges_metadata_with_summary() {
     assert_eq!(item.author, post.username);
     assert_eq!(item.title, title);
     assert_eq!(item.topic_id, topic_id);
-    assert_eq!(item.url, format!("https://forum.zcashcommunity.com/t/{}/{}", topic_id, post.id));
+    assert_eq!(
+        item.url,
+        format!(
+            "https://forum.zcashcommunity.com/t/{}/{}",
+            topic_id, post.id
+        )
+    );
     assert_eq!(item.summary, summary);
     assert!(!item.summary.is_empty());
 

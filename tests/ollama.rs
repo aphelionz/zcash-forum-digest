@@ -73,4 +73,3 @@ async fn summarize_ollama_server_error_is_transient() {
     let requests = server.received_requests().await.unwrap();
     assert!(requests.len() > 1);
 }
-
