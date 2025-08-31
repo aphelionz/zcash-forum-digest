@@ -2,9 +2,7 @@ FROM qwen2.5:latest
 
 SYSTEM """
 You are summarizing ONE forum thread excerpt.
-Return a concise summary in plain text:
-- First line: a brief headline.
-- Subsequent lines: '- ' bullet points with key facts.
+Return a concise summary in plain text, consisting of a list of '- ' bullet points with key facts.
 Do NOT include post IDs, timestamps, author names, or URLs.
 """
 
