@@ -4,13 +4,10 @@ use anyhow::Result;
 use reqwest::{Client, StatusCode};
 use rss::{ChannelBuilder, ItemBuilder};
 use serde::Deserialize;
-use time::{
-    Duration, OffsetDateTime,
-    format_description::well_known::{Rfc2822, Rfc3339},
-};
+use time::{Duration, OffsetDateTime, format_description::well_known::Rfc2822};
 use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
-use zc_forum_etl::{Summary, make_chunk, strip_tags_fast, summarize_with_ollama};
+use zc_forum_etl::{Post, Summary, posts_to_chunk, summarize_with_ollama};
 
 const CHUNK_MAX_CHARS: usize = 1_800;
 const SUM_TIMEOUT_SECS: u64 = 240;
@@ -42,14 +39,6 @@ struct TopicFull {
 #[derive(Deserialize)]
 struct PostStream {
     posts: Vec<Post>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Post {
-    id: u64,
-    cooked: String,
-    #[serde(with = "time::serde::rfc3339")]
-    created_at: OffsetDateTime,
 }
 
 #[tokio::main]
@@ -97,27 +86,24 @@ async fn main() -> Result<()> {
             .max()
             .unwrap_or_else(OffsetDateTime::now_utc);
 
-        let lines = posts_to_lines(posts.iter());
+        let chunk = posts_to_chunk(posts.iter().take(MAX_POSTS_FOR_CHUNK), CHUNK_MAX_CHARS);
 
         let mut recent_html = String::new();
         let mut desc = String::new();
-        if !lines.is_empty() {
-            let chunk = make_chunk(&lines, CHUNK_MAX_CHARS);
-            if !chunk.is_empty() {
-                let prompt = build_prompt(&stub.title, &chunk);
-                match timeout(
-                    StdDuration::from_secs(SUM_TIMEOUT_SECS),
-                    summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-                )
-                .await
-                {
-                    Ok(Ok((summary, _, _))) => {
-                        recent_html = summary_to_html(&summary);
-                        desc = summary_to_text(&summary);
-                    }
-                    Ok(Err(e)) => warn!("LLM summarize failed for {}: {e}", stub.id),
-                    Err(_) => warn!("LLM summarize timed out for {}", stub.id),
+        if !chunk.is_empty() {
+            let prompt = build_prompt(&stub.title, &chunk);
+            match timeout(
+                StdDuration::from_secs(SUM_TIMEOUT_SECS),
+                summarize_with_ollama(&client, &ollama_base, &model, &prompt),
+            )
+            .await
+            {
+                Ok(Ok((summary, _, _))) => {
+                    recent_html = summary_to_html(&summary);
+                    desc = summary_to_text(&summary);
                 }
+                Ok(Err(e)) => warn!("LLM summarize failed for {}: {e}", stub.id),
+                Err(_) => warn!("LLM summarize timed out for {}", stub.id),
             }
         }
 
@@ -244,20 +230,6 @@ async fn fetch_posts(client: &Client, id: u64, cutoff: OffsetDateTime) -> Result
         }
     }
     Ok(all)
-}
-
-fn posts_to_lines<'a>(posts: impl Iterator<Item = &'a Post>) -> Vec<String> {
-    let mut out = Vec::new();
-    for p in posts.take(MAX_POSTS_FOR_CHUNK) {
-        let t = strip_tags_fast(&p.cooked);
-        if t.is_empty() {
-            continue;
-        }
-        if let Ok(ts) = p.created_at.format(&Rfc3339) {
-            out.push(format!("[post:{} @ {}] {}", p.id, ts, t));
-        }
-    }
-    out
 }
 
 fn build_prompt(topic_title: &str, chunk: &str) -> String {

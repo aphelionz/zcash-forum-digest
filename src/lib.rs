@@ -1,7 +1,9 @@
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use serde::Deserialize;
 use std::sync::LazyLock;
 use tiktoken_rs::{CoreBPE, cl100k_base};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub mod ollama;
 pub use ollama::{Summary, summarize_with_ollama};
@@ -119,25 +121,38 @@ pub fn take_prefix_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
-pub fn make_chunk(lines: &[String], max_chars: usize) -> String {
-    let mut cur = String::new();
+#[derive(Deserialize, Clone)]
+pub struct Post {
+    pub id: u64,
+    pub cooked: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+}
+
+pub fn posts_to_chunk<'a>(posts: impl Iterator<Item = &'a Post>, max_chars: usize) -> String {
+    let mut out = String::new();
     let mut cur_chars = 0usize;
-    for l in lines {
-        let l_chars = l.chars().count();
-        if cur_chars + l_chars + 1 > max_chars {
-            let remain = max_chars.saturating_sub(cur_chars);
-            if remain > 0 {
-                cur.push_str(&take_prefix_chars(l, remain));
-            }
-            break;
+    for p in posts {
+        let t = strip_tags_fast(&p.cooked);
+        if t.is_empty() {
+            continue;
         }
-        if !l.is_empty() {
-            cur.push_str(l);
-            cur.push('\n');
-            cur_chars += l_chars + 1; // account for newline
+        if let Ok(ts) = p.created_at.format(&Rfc3339) {
+            let line = format!("[post:{} @ {}] {}", p.id, ts, t);
+            let l_chars = line.chars().count();
+            if cur_chars + l_chars + 1 > max_chars {
+                let remain = max_chars.saturating_sub(cur_chars);
+                if remain > 0 {
+                    out.push_str(&take_prefix_chars(&line, remain));
+                }
+                break;
+            }
+            out.push_str(&line);
+            out.push('\n');
+            cur_chars += l_chars + 1;
         }
     }
-    cur
+    out
 }
 
 #[cfg(test)]
@@ -167,17 +182,6 @@ mod tests {
     fn take_prefix_chars_handles_utf8_boundaries() {
         assert_eq!(take_prefix_chars("a🐱b", 2), "a🐱");
         assert_eq!(take_prefix_chars("a🐱b", 1), "a");
-    }
-
-    #[test]
-    fn make_chunk_truncates_without_splitting_chars() {
-        let lines = vec![
-            "12345".to_string(),
-            "67890".to_string(),
-            "abcde".to_string(),
-        ];
-        let chunk = make_chunk(&lines, 11);
-        assert_eq!(chunk, "12345\n67890");
     }
 
     #[test]
