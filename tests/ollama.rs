@@ -1,5 +1,4 @@
 use reqwest::Client;
-use serde_json::json;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -18,8 +17,7 @@ async fn summarize_ollama_local() {
     let (summary, in_tok, out_tok) = summarize_with_ollama(&client, &base, &model, prompt)
         .await
         .expect("ollama call");
-    assert!(!summary.headline.is_empty());
-    assert!(!summary.bullets.is_empty());
+    assert!(!summary.is_empty());
     assert!(in_tok > 0);
     assert!(out_tok > 0);
 }
@@ -42,7 +40,13 @@ async fn summarize_ollama_client_error_is_permanent() {
         .await;
     let client = Client::new();
     let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
+    unsafe {
+        std::env::set_var("OLLAMA_MAX_ELAPSED_SECS", "1");
+    }
     let res = summarize_with_ollama(&client, &server.uri(), "test-model", prompt).await;
+    unsafe {
+        std::env::remove_var("OLLAMA_MAX_ELAPSED_SECS");
+    }
     assert!(res.is_err());
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
@@ -58,31 +62,15 @@ async fn summarize_ollama_server_error_is_transient() {
         .await;
     let client = Client::new();
     let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
+    unsafe {
+        std::env::set_var("OLLAMA_MAX_ELAPSED_SECS", "1");
+    }
     let res = summarize_with_ollama(&client, &server.uri(), "test-model", prompt).await;
+    unsafe {
+        std::env::remove_var("OLLAMA_MAX_ELAPSED_SECS");
+    }
     assert!(res.is_err());
     let requests = server.received_requests().await.unwrap();
     assert!(requests.len() > 1);
 }
 
-#[tokio::test]
-async fn summarize_ollama_json_error_truncates_raw() {
-    let server = MockServer::start().await;
-    let long_raw = "x".repeat(250);
-    let body = json!({
-        "message": { "content": long_raw }
-    });
-    Mock::given(method("POST"))
-        .and(path("/api/chat"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(body))
-        .mount(&server)
-        .await;
-    let client = Client::new();
-    let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
-    let err = summarize_with_ollama(&client, &server.uri(), "test-model", prompt)
-        .await
-        .expect_err("json parse error")
-        .to_string();
-    let truncated = format!("{}...", "x".repeat(200));
-    assert!(err.contains(&truncated));
-    assert!(!err.contains(&"x".repeat(201)));
-}

@@ -40,7 +40,7 @@ graph TD
 * **Timeouts/Backoff:** HTTP 120s total; exponential backoff for LLM calls; outer task timeout 120s
 * **Concurrency:** topics are processed sequentially (TOPIC_CONCURRENCY = 1) to stay within GitHub Actions timeouts
 * **Chunking:** first‑page posts only (vertical slice), char‑safe chunk ≤ 1.8k
-* **Summaries:** JSON → rendered into text; prefer LLM, fallback to heuristic if present
+* **Summaries:** LLM returns plain text only. All IDs, timestamps, authors, and URLs come directly from the forum API; links are built from IDs via `build_post_url`.
 
 # Agents
 

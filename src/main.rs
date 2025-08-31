@@ -7,7 +7,7 @@ use serde::Deserialize;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc2822};
 use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
-use zc_forum_etl::{Post, Summary, posts_to_chunk, summarize_with_ollama};
+use zc_forum_etl::{compose_digest_item, posts_to_chunk, summarize_with_ollama, Post};
 
 const CHUNK_MAX_CHARS: usize = 1_800;
 const SUM_TIMEOUT_SECS: u64 = 240;
@@ -82,14 +82,12 @@ async fn main() -> Result<()> {
         }
         let last_post = posts
             .iter()
-            .map(|p| p.created_at)
-            .max()
-            .unwrap_or_else(OffsetDateTime::now_utc);
+            .max_by_key(|p| p.created_at)
+            .unwrap();
 
         let chunk = posts_to_chunk(posts.iter().take(MAX_POSTS_FOR_CHUNK), CHUNK_MAX_CHARS);
 
-        let mut recent_html = String::new();
-        let mut desc = String::new();
+        let mut summary = String::new();
         if !chunk.is_empty() {
             let prompt = build_prompt(&stub.title, &chunk);
             match timeout(
@@ -98,25 +96,38 @@ async fn main() -> Result<()> {
             )
             .await
             {
-                Ok(Ok((summary, _, _))) => {
-                    recent_html = summary_to_html(&summary);
-                    desc = summary_to_text(&summary);
-                }
+                Ok(Ok((s, _, _))) => summary = s,
                 Ok(Err(e)) => warn!("LLM summarize failed for {}: {e}", stub.id),
                 Err(_) => warn!("LLM summarize timed out for {}", stub.id),
             }
         }
 
-        html.push_str(&format!("<h2>{}</h2>", stub.title));
-        if !recent_html.is_empty() {
-            html.push_str(&recent_html);
+        let item_data = compose_digest_item(
+            "https://forum.zcashcommunity.com",
+            stub.id,
+            &stub.title,
+            last_post,
+            summary.clone(),
+        );
+
+        html.push_str(&format!(
+            "<h2><a href=\"{url}\">{title}</a></h2>",
+            url = item_data.url,
+            title = item_data.title
+        ));
+        if !item_data.summary.is_empty() {
+            html.push_str(&format!(
+                "<p>{}</p>",
+                item_data.summary.replace('\n', "<br>")
+            ));
         }
 
-        let pub_date = last_post.format(&Rfc2822)?;
+        let pub_date = item_data.created_at.format(&Rfc2822)?;
         let item = ItemBuilder::default()
-            .title(stub.title.clone())
-            .link(format!("https://forum.zcashcommunity.com/t/{}", stub.id))
-            .description((!desc.is_empty()).then_some(desc))
+            .title(item_data.title.clone())
+            .link(item_data.url.clone())
+            .author(Some(item_data.author.clone()))
+            .description((!item_data.summary.is_empty()).then_some(item_data.summary.clone()))
             .pub_date(pub_date)
             .build();
         items.push(item);
@@ -137,36 +148,6 @@ async fn main() -> Result<()> {
         .build();
     std::fs::write("public/rss.xml", channel.to_string())?;
     Ok(())
-}
-
-fn summary_to_html(s: &Summary) -> String {
-    let mut out = String::new();
-    if !s.headline.is_empty() {
-        out.push_str(&format!("<p>{}</p>", s.headline));
-    }
-    if !s.bullets.is_empty() {
-        out.push_str("<ul>");
-        for b in &s.bullets {
-            out.push_str(&format!("<li>{}</li>", b));
-        }
-        out.push_str("</ul>");
-    }
-    out
-}
-
-fn summary_to_text(s: &Summary) -> String {
-    let mut out = String::new();
-    if !s.headline.is_empty() {
-        out.push_str(&s.headline);
-    }
-    for b in &s.bullets {
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str("- ");
-        out.push_str(b);
-    }
-    out
 }
 
 async fn fetch_latest(client: &Client) -> Result<Latest> {

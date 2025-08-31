@@ -32,19 +32,12 @@ struct ChatMsg {
     content: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Summary {
-    pub headline: String,
-    pub bullets: Vec<String>,
-    pub citations: Vec<String>,
-}
-
 pub async fn summarize_with_ollama(
     client: &Client,
     base: &str,
     model: &str,
     prompt: &str,
-) -> Result<(Summary, usize, usize)> {
+) -> Result<(String, usize, usize)> {
     let url = format!("{}/api/chat", base.trim_end_matches('/'));
 
     let body = ChatReq {
@@ -103,16 +96,8 @@ pub async fn summarize_with_ollama(
 
             let raw = r.message.content;
             let out_tok = BPE.encode_with_special_tokens(&raw).len();
-            let summary: Summary = serde_json::from_str(&raw).map_err(|e| {
-                let mut chars = raw.chars();
-                let mut truncated: String = chars.by_ref().take(200).collect();
-                if chars.next().is_some() {
-                    truncated.push_str("...");
-                }
-                backoff::Error::transient(anyhow!("json: {e:?} raw: {truncated}"))
-            })?;
 
-            Ok::<(Summary, usize), backoff::Error<anyhow::Error>>((summary, out_tok))
+            Ok::<(String, usize), backoff::Error<anyhow::Error>>((raw, out_tok))
         }
     };
 
