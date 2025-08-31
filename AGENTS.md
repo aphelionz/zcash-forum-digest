@@ -1,6 +1,6 @@
 # Overview
 
-This repo implements a local-first ETL + summarization pipeline for the Zcash Community Forum. It ingests topics/posts from Discourse, stores them in Postgres, and produces per‑topic summaries using a local LLM (Ollama + Qwen). A small CLI (show) displays the latest or searched summaries.
+This repo implements an in-memory summarization pipeline for the Zcash Community Forum. It ingests topics/posts from Discourse, summarizes them with a local LLM (Ollama + Qwen), and emits per-topic summaries directly to HTML and RSS outputs.
 
 Note to coding agents: Please always remember to update this doc when making changes to the architecture, conventions, or components.
 
@@ -14,33 +14,17 @@ graph TD
 
   subgraph Rust_App["Rust App"]
     F[Fetcher\\nreqwest + tokio]
-    U[Upserter\\nsqlx]
-    G[Change Guard\\nLast LLM Check]
     B[Text Prep\\nHTML→text, chunk ≤ 1.8k]
     S[Summarizer\\nOllama /api/chat]
-  end
-
-  subgraph Postgres
-    TBL1[(topics)]
-    TBL2[(posts)]
-    TBL3[(topic_summaries_llm)]
+    O[Outputs\\nHTML & RSS]
   end
 
   subgraph Local_Tools["Local Tools"]
-    CLI[show CLI]
     JUST[Justfile helpers]
     NIX[Nix dev shell]
   end
 
-  DZC -->|latest topics| F -->|topic pages| U
-  U -->|upsert| TBL1
-  U -->|upsert| TBL2
-  TBL2 --> G
-  G -->|changed?| B
-  B -->|prompt| S -->|JSON summary| TBL3
-  CLI -->|read prefer LLM| TBL3
-  CLI -->|fallback| TBL1
-  CLI -->|fallback| TBL2
+  DZC -->|latest topics| F -->|topic pages| B -->|prompt| S -->|summary| O
 
   subgraph Observability
     TR[tracing logs]
@@ -52,7 +36,6 @@ graph TD
 # Shared Conventions
 
 * **Language:** Rust 1.89
-* **DB:** Postgres (via sqlx), tables: topics, posts, topic_summaries_llm
 * **LLM:** Ollama HTTP API /api/chat (Qwen2.5 latest or equivalent)
 * **Timeouts/Backoff:** HTTP 120s total; exponential backoff for LLM calls; outer task timeout 120s
 * **Concurrency:** topics are processed sequentially (TOPIC_CONCURRENCY = 1) to stay within GitHub Actions timeouts
@@ -63,7 +46,7 @@ graph TD
 
 ## 1) Fetcher
 
-**Purpose:** Pull latest topic list and all posts for each topic via pagination from Discourse.
+**Purpose:** Pull latest topic list and posts for each topic via pagination from Discourse.
 
 **Triggers:** On `zc-forum-etl` run.
 
@@ -71,9 +54,7 @@ graph TD
 * https://forum.zcashcommunity.com/latest.json
 * https://forum.zcashcommunity.com/t/{id}.json
 
-**Outputs:** Upserts into `topics(id, title)` and `posts(id, topic_id, username, cooked, created_at)`.
-
-**Key env:** `DATABASE_URL`
+**Outputs:** Posts held in memory for summarization.
 
 **Failure Handling:** network errors → `error_for_status`; retries are simple (re-run process). Non‑fatal; logs via `tracing`.
 
@@ -81,18 +62,7 @@ graph TD
 
 **Notes:** page requests pause for 1s to respect Discourse rate limits and stop when a page returns fewer than 20 posts or a 404.
 
-## 2) Change Guard
-**Purpose:** Avoid redundant summarization.
-
-**Rule:** Summarize only if `MAX(posts.created_at)` for the topic is newer than topic_summaries_llm.updated_at.
-
-**Inputs:** `posts`, `topic_summaries_llm`
-
-**Outputs:** boolean gate to Summarizer.
-
-**Failure Handling:** missing rows → defaults to summarize once.
-
-## 3) Text Prep
+## 2) Text Prep
 
 **Purpose:** Convert HTML (`cooked`) to space‑normalized text and build an excerpt with post IDs & timestamps.
 
@@ -101,7 +71,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Limits:** ≤ 1.8k chars (char‑safe truncation). Posts before the 24‑hour cutoff are summarized for context, and posts within the last 24 hours are summarized separately for the digest.
 
-## 4) Summarizer (Local LLM)
+## 3) Summarizer (Local LLM)
 
 **Purpose:** Create concise, factual summaries with citations.
 
@@ -122,54 +92,29 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 **Tokenization:** prompt and response tokens counted via `tiktoken-rs` using a globally cached `cl100k_base` encoder and stored as `input_tokens`/`output_tokens`.
 
-**Outputs → DB:** topic_summaries_llm(topic_id, summary, recent_summary, model, prompt_hash, input_tokens, output_tokens, updated_at).
+**Outputs:** summaries are used immediately to build HTML and RSS output, then discarded.
 
 **Failure Handling:** timeout/HTTP error → warn and continue; JSON parse errors log the raw LLM output truncated to 200 chars with an ellipsis; process remains healthy.
 
-## 5) Storage
+## 4) Dev Shell & Helpers
 
-**Tables:**
-* `topics(id BIGINT PRIMARY KEY, title TEXT)`
-* `posts(id BIGINT PRIMARY KEY, topic_id BIGINT, username TEXT, cooked TEXT, created_at TIMESTAMPTZ)`
-* `topic_summaries_llm(topic_id PK, summary TEXT, recent_summary TEXT, model TEXT, prompt_hash TEXT, input_tokens INT, output_tokens INT, cost_usd NUMERIC, updated_at TIMESTAMPTZ)`
+**Nix dev shell:** pins Rust toolchain, `just`, and optional helpers like `ollama` and `grip`.
 
-**Indexes:**
-* `posts(topic_id, created_at)`
-* `posts(topic_id, id)`
-* `topic_summaries_llm(updated_at DESC)`
-
-## 6) CLI Viewer (`show`)
-
-**Purpose:** Inspect summaries quickly from the terminal.
-
-**Commands:**
-
-* `show latest [N]`
-* `show id <topic_id>`
-* `show search <query> [N]`
-
-**Selection:** Prefer `topic_summaries_llm`, fallback to `topic_summaries` if present.
-
-## 7) Dev Shell & Helpers
-
-**Nix dev shell:** pins Rust toolchain, Postgres, `sqlx`, `just`, etc.; custom prompt indicating dev shell.
-
-**Justfile:** `startup/pg-start/pg-stop/db-create/db-reset/test/lint/cov/summaries`.
+**Justfile:** `startup/teardown/test/lint/cov`.
 
 **Exit hook:** `teardown` runs when leaving nix develop.
 
-## 8) CI
+## 5) CI
 
 **Purpose:** Lint and test on pushes and PRs.
 
-**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, caches and (if needed) builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page, and deploys it to GitHub Pages on a daily schedule or manual trigger.
+**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the digest generator, and deploys it to GitHub Pages on a daily schedule or manual trigger.
 It uses `Swatinem/rust-cache` to reuse Cargo registry and build artifacts across runs.
 
 ## Configuration
 
 **Environment variables**
 
-* `DATABASE_URL=postgres://...`
 * `LLM_MODEL=qwen2.5:latest`
 * `OLLAMA_BASE_URL=http://127.0.0.1:11434` (or custom port)
 * `OLLAMA_MAX_ELAPSED_SECS=120` (optional retry timeout override)
@@ -204,11 +149,11 @@ Only public forum content is processed; avoid logging raw post bodies at `INFO`.
 
 Consider per‑provider allowlist if you later add remote LLMs.
 
-## 9) Daily Digest
+## 6) Daily Digest
 
 **Purpose:** Publish an HTML and RSS digest of forum topics updated in the last 24 hours.
 
-**Runtime:** The `digest` binary queries recent topics, renders stored LLM summaries for context (posts older than 24 hours) and a second summary for posts from the last 24 hours. It writes both `public/index.html` and `public/rss.xml`.
+**Runtime:** The binary fetches recent topics, summarizes context (posts older than 24 hours) and recent posts, then writes `public/index.html` and `public/rss.xml`.
 
-**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the ETL, generates the digest page and RSS feed, and deploys them to GitHub Pages on a daily schedule or manual trigger.
+**Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the digest generator, and deploys the output to GitHub Pages on a daily schedule or manual trigger.
 

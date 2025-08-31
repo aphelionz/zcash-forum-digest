@@ -1,5 +1,5 @@
 {
-  description = "Zcash Forum ETL: Rust toolchain + static analysis + tests + Postgres";
+  description = "Zcash Forum Digest: Rust toolchain + static analysis + local LLM";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -15,15 +15,6 @@
           overlays = [ (import rust-overlay) ];
         };
 
-        # ---- Single source of truth for local PG ----
-        pg = {
-          name = "zc_forum";
-          port = "54329";
-          user = "postgres";
-          host = "127.0.0.1";
-          data = ".nix/pgdata";
-        };
-
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "clippy" "rustfmt" "rust-src" ];
         };
@@ -34,9 +25,7 @@
           cargo-deny
           cargo-audit
           cargo-watch
-          sqlx-cli
           just
-          postgresql_15
           pkg-config
           openssl
           protobuf
@@ -51,14 +40,6 @@
         devShells.default = pkgs.mkShell {
           packages = devPkgs;
 
-          # Exported env (apps/CLI use DATABASE_URL; PG* is local sugar)
-          PGHOST = pg.host;
-          PGPORT = pg.port;
-          PGUSER = pg.user;
-          PGDATABASE = pg.name;
-          PGPASSWORD = "";
-          PGDATA = pg.data;
-          DATABASE_URL = "postgresql://${pg.user}@${pg.host}:${pg.port}/${pg.name}";
           LLM_SUMMARIZER = "ollama";
           LLM_MODEL = "zc-forum-summarizer";
           OLLAMA_BASE_URL = "http://127.0.0.1:11434";
@@ -75,19 +56,14 @@
             # prepend marker to your shell prompt
             export PS1="\[\033[1;36m\](zc-forum)\[\033[0m\] $PS1"
 
-            # start "daemons"
+            # start helpers
             just startup
 
-            # stop Postgres when shell exits
             trap 'echo "Tearing down"; just teardown || true' EXIT
 
             echo "Rust: $(rustc --version)"
-            echo "Postgres: $PGHOST:$PGPORT db=$PGDATABASE (data: $PGDATA)"
             echo
             echo "Helpers:"
-            echo "  just pg-start     # start local Postgres"
-            echo "  just pg-stop      # stop local Postgres"
-            echo "  just db-create    # create '${pg.name}'"
             echo "  just test         # nextest"
             echo "  just lint         # clippy + fmt check"
             echo "  just cov          # coverage (llvm-cov)"
@@ -99,12 +75,6 @@
 
         devShells.ci = pkgs.mkShell {
           packages = devPkgs;
-          PGHOST = pg.host;
-          PGPORT = pg.port;
-          PGUSER = pg.user;
-          PGDATABASE = pg.name;
-          PGDATA = pg.data;
-          DATABASE_URL = "postgresql://${pg.user}@${pg.host}:${pg.port}/${pg.name}";
         };
 
         formatter = pkgs.nixpkgs-fmt;

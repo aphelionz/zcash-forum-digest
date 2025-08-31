@@ -14,25 +14,7 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        ports:
-          - 54329:5432            # match your local port
-        env:
-          POSTGRES_DB: zc_forum
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        # Ensure Postgres is ready before steps run
-        options: >-
-          --health-cmd="pg_isready -U postgres -d zc_forum"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=12
-
     env:
-      # single source of truth for tests
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54329/zc_forum
       RUST_BACKTRACE: full
       CARGO_TERM_COLOR: always
       OLLAMA_MAX_ELAPSED_SECS: 1
@@ -53,23 +35,6 @@ jobs:
         with:
           tool: cargo-nextest
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: sqlx-cli
-
-      - name: Wait for Postgres
-        run: |
-          for i in {1..30}; do
-            pg_isready -h 127.0.0.1 -p 54329 -U postgres -d zc_forum && exit 0
-            sleep 1
-          done
-          echo "Postgres did not become ready in time" >&2
-          exit 1
-
-      - name: Apply migrations
-        if: ${{ hashFiles('migrations/**') != '' }}
-        run: |
-          sqlx migrate run --database-url "$DATABASE_URL"
 
       - name: Format
         run: cargo fmt --all -- --check

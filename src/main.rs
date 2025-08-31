@@ -1,49 +1,51 @@
+use std::time::Duration as StdDuration;
+
 use anyhow::Result;
-use futures::{StreamExt, stream};
 use reqwest::{Client, StatusCode};
+use rss::{ChannelBuilder, ItemBuilder};
 use serde::Deserialize;
-use sqlx::{PgPool, query};
-use time::{Duration as StdDuration, OffsetDateTime};
-use tokio::time::{Duration, timeout};
-use tracing::{info, instrument, warn};
-use zc_forum_etl::{
-    Summary, load_plain_lines_after, load_plain_lines_before, make_chunk,
-    posts_changed_since_last_llm, prompt_hash, summarize_with_ollama,
+use time::{
+    Duration, OffsetDateTime,
+    format_description::well_known::{Rfc2822, Rfc3339},
 };
+use tokio::time::{sleep, timeout};
+use tracing::{info, warn};
+use zc_forum_etl::{Summary, make_chunk, strip_tags_fast, summarize_with_ollama};
 
-const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
-const SUM_TIMEOUT_SECS: u64 = 240; // wrap around our own retry/HTTP timeouts
-const TOPIC_CONCURRENCY: usize = 1; // process topics sequentially to avoid CI timeouts
+const CHUNK_MAX_CHARS: usize = 1_800;
+const SUM_TIMEOUT_SECS: u64 = 240;
+const PAGE_SIZE: usize = 20;
+const MAX_POSTS_FOR_CHUNK: usize = 200;
 
-const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434";
-
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct Latest {
     topic_list: TopicList,
 }
-#[derive(Debug, Deserialize)]
+
+#[derive(Deserialize)]
 struct TopicList {
     topics: Vec<TopicStub>,
 }
-#[derive(Debug, Deserialize)]
+
+#[derive(Deserialize)]
 struct TopicStub {
     id: u64,
     title: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[derive(Deserialize)]
 struct TopicFull {
     id: u64,
     title: String,
     post_stream: PostStream,
 }
-#[derive(Debug, Deserialize)]
+
+#[derive(Deserialize)]
 struct PostStream {
     posts: Vec<Post>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Post {
     id: u64,
     topic_id: u64,
@@ -57,238 +59,142 @@ struct Post {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    let pool = PgPool::connect(&std::env::var("DATABASE_URL")?).await?;
-
-    // HTTP client: long overall timeout; local servers sometimes take a bit on first load.
+    // HTTP client: generous timeouts for local servers.
     let client = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
+        .connect_timeout(StdDuration::from_secs(10))
+        .timeout(StdDuration::from_secs(120))
         .build()?;
 
-    // Ollama model + base URL
     let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "qwen2.5:latest".to_string());
     let ollama_base =
-        std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| OLLAMA_DEFAULT_BASE.to_string());
+        std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
 
-    // Warm up the model once and warn if it fails.
+    // Warmup
     let warm_prompt = build_prompt("warmup", "warmup");
-    let warmup_res = summarize_with_ollama(&client, &ollama_base, &model, &warm_prompt).await;
-    if let Err(e) = warmup_res {
+    if let Err(e) = summarize_with_ollama(&client, &ollama_base, &model, &warm_prompt).await {
         warn!("Warm-up summarize_with_ollama failed: {e}");
     }
 
-    // Fetch latest list of topics
     let latest: Latest = fetch_latest(&client).await?;
     info!("Fetched {} topics", latest.topic_list.topics.len());
 
-    let topics = latest.topic_list.topics;
-    // Sequential processing keeps CI runs within timeouts. Adjust
-    // `TOPIC_CONCURRENCY` if parallelism is desired locally.
-    stream::iter(topics.into_iter())
-        .map(|topic| {
-            let client = client.clone();
-            let pool = pool.clone();
-            let model = model.clone();
-            let ollama_base = ollama_base.clone();
-            async move {
-                if let Err(e) = process_topic(client, pool, model, ollama_base, topic).await {
-                    warn!("Topic processing failed: {e:?}");
-                }
-            }
-        })
-        .buffer_unordered(TOPIC_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await;
+    let mut html = String::new();
+    html.push_str("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Zcash Forum Digest</title></head><body>");
+    html.push_str(&format!(
+        "<h1>Zcash Forum Digest for {}</h1><p><a href=\"rss.xml\">RSS Feed</a></p>",
+        OffsetDateTime::now_utc().date()
+    ));
 
-    info!("ETL + local LLM summaries complete.");
-    Ok(())
-}
+    let mut items = Vec::new();
+    let cutoff = OffsetDateTime::now_utc() - Duration::hours(24);
 
-async fn process_topic(
-    client: Client,
-    pool: PgPool,
-    model: String,
-    ollama_base: String,
-    topic: TopicStub,
-) -> Result<()> {
-    // Upsert topic metadata
-    query!(
-        r#"INSERT INTO topics (id, title) VALUES ($1, $2)
-           ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title"#,
-        topic.id as i64,
-        topic.title
-    )
-    .execute(&pool)
-    .await?;
-
-    // Fetch all pages of posts for this topic
-    let mut page: u32 = 0;
-    loop {
-        if page > 0 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+    for stub in latest.topic_list.topics {
+        let posts = fetch_posts(&client, stub.id).await?;
+        if posts.iter().all(|p| p.created_at < cutoff) {
+            continue;
         }
-        let full = match fetch_topic_page(&client, topic.id, page).await {
-            Ok(f) => f,
-            Err(e) => {
-                if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
-                    if req_err.status() == Some(StatusCode::NOT_FOUND) {
-                        break;
+        let last_post = posts
+            .iter()
+            .map(|p| p.created_at)
+            .max()
+            .unwrap_or_else(OffsetDateTime::now_utc);
+
+        let context_lines = posts_to_lines(posts.iter().filter(|p| p.created_at < cutoff));
+        let recent_lines = posts_to_lines(posts.iter().filter(|p| p.created_at >= cutoff));
+
+        let mut context_text = String::new();
+        if !context_lines.is_empty() {
+            let chunk = make_chunk(&context_lines, CHUNK_MAX_CHARS);
+            if !chunk.is_empty() {
+                let prompt = build_prompt(&stub.title, &chunk);
+                match timeout(
+                    StdDuration::from_secs(SUM_TIMEOUT_SECS),
+                    summarize_with_ollama(&client, &ollama_base, &model, &prompt),
+                )
+                .await
+                {
+                    Ok(Ok((summary, _, _))) => {
+                        context_text = summary_to_text(&summary);
                     }
-                }
-                return Err(e);
-            }
-        };
-        let count = full.post_stream.posts.len();
-        if count == 0 {
-            break;
-        }
-        info!("Topic {} page {} → {} posts", topic.id, page, count);
-
-        for p in full.post_stream.posts {
-            query!(
-                r#"
-                INSERT INTO posts (id, topic_id, username, cooked, created_at)
-                VALUES ($1,$2,$3,$4,$5)
-                ON CONFLICT (id) DO UPDATE SET
-                  topic_id = EXCLUDED.topic_id,
-                  username = EXCLUDED.username,
-                  cooked = EXCLUDED.cooked,
-                  created_at = EXCLUDED.created_at
-                "#,
-                p.id as i64,
-                p.topic_id as i64,
-                p.username,
-                p.cooked,
-                p.created_at
-            )
-            .execute(&pool)
-            .await?;
-        }
-
-        if count < 20 {
-            break;
-        }
-        page += 1;
-    }
-
-    // Skip if no new posts since last LLM summary
-    if !posts_changed_since_last_llm(&pool, topic.id as i64).await? {
-        info!("Topic {} unchanged since last LLM summary → skip", topic.id);
-        return Ok(());
-    }
-
-    // Build compact chunks for posts before and after cutoff
-    let cutoff = OffsetDateTime::now_utc() - StdDuration::hours(24);
-    let before_lines = load_plain_lines_before(&pool, topic.id as i64, cutoff).await?;
-    let after_lines = load_plain_lines_after(&pool, topic.id as i64, cutoff).await?;
-
-    if before_lines.is_empty() && after_lines.is_empty() {
-        return Ok(());
-    }
-
-    let default_summary_json = serde_json::to_string(&Summary {
-        headline: String::new(),
-        bullets: Vec::new(),
-        citations: Vec::new(),
-    })?;
-
-    let mut context_summary_json = default_summary_json.clone();
-    let mut recent_summary_json: Option<String> = None;
-    let mut total_in = 0usize;
-    let mut total_out = 0usize;
-    let mut prompt_concat = String::new();
-    let started = std::time::Instant::now();
-
-    if !before_lines.is_empty() {
-        let chunk = make_chunk(&before_lines, CHUNK_MAX_CHARS);
-        if !chunk.is_empty() {
-            let prompt = build_prompt(&topic.title, &chunk);
-            prompt_concat.push_str(&prompt);
-            match timeout(
-                Duration::from_secs(SUM_TIMEOUT_SECS),
-                summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-            )
-            .await
-            {
-                Err(_) => {
-                    warn!("LLM summarize timed out for {} (context)", topic.id);
-                }
-                Ok(Err(e)) => {
-                    warn!("LLM summarize failed for {} (context): {e}", topic.id);
-                }
-                Ok(Ok((summary, in_tok, out_tok))) => {
-                    context_summary_json = serde_json::to_string(&summary)?;
-                    total_in += in_tok;
-                    total_out += out_tok;
+                    Ok(Err(e)) => warn!("LLM summarize failed for {} (context): {e}", stub.id),
+                    Err(_) => warn!("LLM summarize timed out for {} (context)", stub.id),
                 }
             }
         }
-    }
 
-    if !after_lines.is_empty() {
-        let chunk = make_chunk(&after_lines, CHUNK_MAX_CHARS);
-        if !chunk.is_empty() {
-            let prompt = build_prompt(&topic.title, &chunk);
-            prompt_concat.push_str(&prompt);
-            match timeout(
-                Duration::from_secs(SUM_TIMEOUT_SECS),
-                summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-            )
-            .await
-            {
-                Err(_) => {
-                    warn!("LLM summarize timed out for {} (recent)", topic.id);
-                }
-                Ok(Err(e)) => {
-                    warn!("LLM summarize failed for {} (recent): {e}", topic.id);
-                }
-                Ok(Ok((summary, in_tok, out_tok))) => {
-                    recent_summary_json = Some(serde_json::to_string(&summary)?);
-                    total_in += in_tok;
-                    total_out += out_tok;
+        let mut recent_text = String::new();
+        if !recent_lines.is_empty() {
+            let chunk = make_chunk(&recent_lines, CHUNK_MAX_CHARS);
+            if !chunk.is_empty() {
+                let prompt = build_prompt(&stub.title, &chunk);
+                match timeout(
+                    StdDuration::from_secs(SUM_TIMEOUT_SECS),
+                    summarize_with_ollama(&client, &ollama_base, &model, &prompt),
+                )
+                .await
+                {
+                    Ok(Ok((summary, _, _))) => {
+                        recent_text = summary_to_text(&summary);
+                    }
+                    Ok(Err(e)) => warn!("LLM summarize failed for {} (recent): {e}", stub.id),
+                    Err(_) => warn!("LLM summarize timed out for {} (recent)", stub.id),
                 }
             }
         }
+
+        html.push_str(&format!("<h2>{}</h2>", stub.title));
+        let mut desc = String::new();
+        if !context_text.is_empty() {
+            html.push_str(&format!("<p>{}</p>", context_text));
+            desc.push_str(&context_text);
+        }
+        if !recent_text.is_empty() {
+            html.push_str("<h3>Last 24h</h3>");
+            html.push_str(&format!("<p>{}</p>", recent_text));
+            if !desc.is_empty() {
+                desc.push(' ');
+            }
+            desc.push_str(&recent_text);
+        }
+
+        let pub_date = last_post.format(&Rfc2822)?;
+        let item = ItemBuilder::default()
+            .title(stub.title.clone())
+            .link(format!("https://forum.zcashcommunity.com/t/{}", stub.id))
+            .description((!desc.is_empty()).then_some(desc))
+            .pub_date(pub_date)
+            .build();
+        items.push(item);
     }
 
-    let phash = prompt_hash(topic.id as i64, &model, &prompt_concat);
+    html.push_str("</body></html>");
+    std::fs::create_dir_all("public")?;
+    std::fs::write("public/index.html", html)?;
 
-    query!(
-        r#"
-        INSERT INTO topic_summaries_llm (topic_id, summary, recent_summary, model, prompt_hash, input_tokens, output_tokens, cost_usd)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
-        ON CONFLICT (topic_id) DO UPDATE SET
-          summary = EXCLUDED.summary,
-          recent_summary = EXCLUDED.recent_summary,
-          model = EXCLUDED.model,
-          prompt_hash = EXCLUDED.prompt_hash,
-          input_tokens = EXCLUDED.input_tokens,
-          output_tokens = EXCLUDED.output_tokens,
-          updated_at = now()
-        "#,
-        topic.id as i64,
-        context_summary_json,
-        recent_summary_json,
-        model,
-        phash,
-        total_in as i32,
-        total_out as i32
-    )
-    .execute(&pool)
-    .await?;
-
-    info!(
-        "LLM summarized topic {} in {:?}",
-        topic.id,
-        started.elapsed()
-    );
-
+    let channel = ChannelBuilder::default()
+        .title(format!(
+            "Zcash Forum Digest for {}",
+            OffsetDateTime::now_utc().date()
+        ))
+        .link("https://forum.zcashcommunity.com")
+        .description("Topics updated in the last 24 hours")
+        .items(items)
+        .build();
+    std::fs::write("public/rss.xml", channel.to_string())?;
     Ok(())
 }
 
-/* ---------------- Discourse HTTP ---------------- */
+fn summary_to_text(s: &Summary) -> String {
+    let mut ctx = s.headline.clone();
+    if !s.bullets.is_empty() {
+        if !ctx.is_empty() {
+            ctx.push(' ');
+        }
+        ctx.push_str(&s.bullets.join(" "));
+    }
+    ctx
+}
 
-#[instrument(skip(client))]
 async fn fetch_latest(client: &Client) -> Result<Latest> {
     Ok(client
         .get("https://forum.zcashcommunity.com/latest.json")
@@ -299,7 +205,6 @@ async fn fetch_latest(client: &Client) -> Result<Latest> {
         .await?)
 }
 
-#[instrument(skip(client))]
 async fn fetch_topic_page(client: &Client, id: u64, page: u32) -> Result<TopicFull> {
     let url = if page == 0 {
         format!("https://forum.zcashcommunity.com/t/{}.json", id)
@@ -318,7 +223,50 @@ async fn fetch_topic_page(client: &Client, id: u64, page: u32) -> Result<TopicFu
         .await?)
 }
 
-/* Formatting instructions are in Modelfile */
+async fn fetch_posts(client: &Client, id: u64) -> Result<Vec<Post>> {
+    let mut all = Vec::new();
+    let mut page = 0;
+    loop {
+        match fetch_topic_page(client, id, page).await {
+            Ok(tf) => {
+                let count = tf.post_stream.posts.len();
+                if count == 0 {
+                    break;
+                }
+                all.extend(tf.post_stream.posts);
+                if count < PAGE_SIZE {
+                    break;
+                }
+                page += 1;
+                sleep(StdDuration::from_secs(1)).await;
+            }
+            Err(e) => {
+                if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
+                    if req_err.status() == Some(StatusCode::NOT_FOUND) {
+                        break;
+                    }
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(all)
+}
+
+fn posts_to_lines<'a>(posts: impl Iterator<Item = &'a Post>) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in posts.take(MAX_POSTS_FOR_CHUNK) {
+        let t = strip_tags_fast(&p.cooked);
+        if t.is_empty() {
+            continue;
+        }
+        if let Ok(ts) = p.created_at.format(&Rfc3339) {
+            out.push(format!("[post:{} @ {}] {}", p.id, ts, t));
+        }
+    }
+    out
+}
+
 fn build_prompt(topic_title: &str, chunk: &str) -> String {
     format!(
         "Thread: {title}\n\nContent excerpt:\n---\n{body}\n---",
