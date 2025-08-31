@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
 
     let estimated_html_size = 2048 + latest.topic_list.topics.len() * 2048;
     let mut html = String::with_capacity(estimated_html_size);
-    html.push_str("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Zcash Forum Digest</title></head><body>");
+    html.push_str("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Zcash Forum Digest</title><link rel=\"stylesheet\" href=\"./style.css\"></head><body>");
     html.push_str(&format!(
         "<h1>Zcash Forum Digest for {}</h1><p><a href=\"rss.xml\">RSS Feed</a></p>",
         OffsetDateTime::now_utc().date()
