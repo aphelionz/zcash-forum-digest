@@ -7,8 +7,8 @@ use time::{Duration as StdDuration, OffsetDateTime};
 use tokio::time::{Duration, timeout};
 use tracing::{info, instrument, warn};
 use zc_forum_etl::{
-    Summary, load_plain_lines_after, load_plain_lines_before, make_chunk,
-    posts_changed_since_last_llm, prompt_hash, summarize_with_ollama,
+    Summary, load_plain_lines_after, make_chunk, posts_changed_since_last_llm, prompt_hash,
+    summarize_with_ollama,
 };
 
 const CHUNK_MAX_CHARS: usize = 1_800; // keep prompt small for local models
@@ -121,7 +121,8 @@ async fn process_topic(
     .execute(&pool)
     .await?;
 
-    // Fetch all pages of posts for this topic
+    // Fetch all pages of posts for this topic (recent 24h only)
+    let cutoff = OffsetDateTime::now_utc() - StdDuration::hours(24);
     let mut page: u32 = 0;
     loop {
         if page > 0 {
@@ -144,7 +145,12 @@ async fn process_topic(
         }
         info!("Topic {} page {} → {} posts", topic.id, page, count);
 
+        let mut saw_old = false;
         for p in full.post_stream.posts {
+            if p.created_at < cutoff {
+                saw_old = true;
+                continue;
+            }
             query!(
                 r#"
                 INSERT INTO posts (id, topic_id, username, cooked, created_at)
@@ -165,7 +171,7 @@ async fn process_topic(
             .await?;
         }
 
-        if count < 20 {
+        if count < 20 || saw_old {
             break;
         }
         page += 1;
@@ -177,12 +183,9 @@ async fn process_topic(
         return Ok(());
     }
 
-    // Build compact chunks for posts before and after cutoff
-    let cutoff = OffsetDateTime::now_utc() - StdDuration::hours(24);
-    let before_lines = load_plain_lines_before(&pool, topic.id as i64, cutoff).await?;
+    // Build compact chunk for posts in the last 24 hours
     let after_lines = load_plain_lines_after(&pool, topic.id as i64, cutoff).await?;
-
-    if before_lines.is_empty() && after_lines.is_empty() {
+    if after_lines.is_empty() {
         return Ok(());
     }
 
@@ -192,61 +195,31 @@ async fn process_topic(
         citations: Vec::new(),
     })?;
 
-    let mut context_summary_json = default_summary_json.clone();
-    let mut recent_summary_json: Option<String> = None;
+    let mut summary_json = default_summary_json.clone();
     let mut total_in = 0usize;
     let mut total_out = 0usize;
     let mut prompt_concat = String::new();
     let started = std::time::Instant::now();
-
-    if !before_lines.is_empty() {
-        let chunk = make_chunk(&before_lines, CHUNK_MAX_CHARS);
-        if !chunk.is_empty() {
-            let prompt = build_prompt(&topic.title, &chunk);
-            prompt_concat.push_str(&prompt);
-            match timeout(
-                Duration::from_secs(SUM_TIMEOUT_SECS),
-                summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-            )
-            .await
-            {
-                Err(_) => {
-                    warn!("LLM summarize timed out for {} (context)", topic.id);
-                }
-                Ok(Err(e)) => {
-                    warn!("LLM summarize failed for {} (context): {e}", topic.id);
-                }
-                Ok(Ok((summary, in_tok, out_tok))) => {
-                    context_summary_json = serde_json::to_string(&summary)?;
-                    total_in += in_tok;
-                    total_out += out_tok;
-                }
+    let chunk = make_chunk(&after_lines, CHUNK_MAX_CHARS);
+    if !chunk.is_empty() {
+        let prompt = build_prompt(&topic.title, &chunk);
+        prompt_concat.push_str(&prompt);
+        match timeout(
+            Duration::from_secs(SUM_TIMEOUT_SECS),
+            summarize_with_ollama(&client, &ollama_base, &model, &prompt),
+        )
+        .await
+        {
+            Err(_) => {
+                warn!("LLM summarize timed out for {}", topic.id);
             }
-        }
-    }
-
-    if !after_lines.is_empty() {
-        let chunk = make_chunk(&after_lines, CHUNK_MAX_CHARS);
-        if !chunk.is_empty() {
-            let prompt = build_prompt(&topic.title, &chunk);
-            prompt_concat.push_str(&prompt);
-            match timeout(
-                Duration::from_secs(SUM_TIMEOUT_SECS),
-                summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-            )
-            .await
-            {
-                Err(_) => {
-                    warn!("LLM summarize timed out for {} (recent)", topic.id);
-                }
-                Ok(Err(e)) => {
-                    warn!("LLM summarize failed for {} (recent): {e}", topic.id);
-                }
-                Ok(Ok((summary, in_tok, out_tok))) => {
-                    recent_summary_json = Some(serde_json::to_string(&summary)?);
-                    total_in += in_tok;
-                    total_out += out_tok;
-                }
+            Ok(Err(e)) => {
+                warn!("LLM summarize failed for {}: {e}", topic.id);
+            }
+            Ok(Ok((summary, in_tok, out_tok))) => {
+                summary_json = serde_json::to_string(&summary)?;
+                total_in += in_tok;
+                total_out += out_tok;
             }
         }
     }
@@ -267,8 +240,8 @@ async fn process_topic(
           updated_at = now()
         "#,
         topic.id as i64,
-        context_summary_json,
-        recent_summary_json,
+        summary_json,
+        Option::<String>::None,
         model,
         phash,
         total_in as i32,

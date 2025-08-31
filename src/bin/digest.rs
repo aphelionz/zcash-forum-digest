@@ -16,12 +16,12 @@ async fn main() -> Result<()> {
 
     // fetch topics with activity in last 24 hours
     let rows = sqlx::query(
-        r#"SELECT t.id, t.title, ts.summary, ts.recent_summary, MAX(p.created_at) AS last_post
+        r#"SELECT t.id, t.title, ts.summary, MAX(p.created_at) AS last_post
             FROM topics t
             JOIN posts p ON t.id = p.topic_id
             LEFT JOIN topic_summaries_llm ts ON t.id = ts.topic_id
             WHERE p.created_at >= now() - interval '1 day'
-            GROUP BY t.id, t.title, ts.summary, ts.recent_summary
+            GROUP BY t.id, t.title, ts.summary
             ORDER BY last_post DESC"#,
     )
     .fetch_all(&pool)
@@ -38,7 +38,6 @@ async fn main() -> Result<()> {
         let id: i64 = row.get("id");
         let title: String = row.get("title");
         let summary_json: Option<String> = row.get("summary");
-        let recent_summary_json: Option<String> = row.get("recent_summary");
         let last_post: OffsetDateTime = row.get("last_post");
         html.push_str(&format!("<h2>{}</h2>", title));
 
@@ -55,26 +54,6 @@ async fn main() -> Result<()> {
                 }
                 if !ctx.is_empty() {
                     html.push_str(&format!("<p>{}</p>", ctx));
-                    desc.push_str(&ctx);
-                }
-            }
-        }
-
-        if let Some(js) = recent_summary_json {
-            if let Ok(s) = serde_json::from_str::<LlmSummary>(&js) {
-                let mut ctx = s.headline;
-                if !s.bullets.is_empty() {
-                    if !ctx.is_empty() {
-                        ctx.push(' ');
-                    }
-                    ctx.push_str(&s.bullets.join(" "));
-                }
-                if !ctx.is_empty() {
-                    html.push_str("<h3>Last 24h</h3>");
-                    html.push_str(&format!("<p>{}</p>", ctx));
-                    if !desc.is_empty() {
-                        desc.push(' ');
-                    }
                     desc.push_str(&ctx);
                 }
             }
