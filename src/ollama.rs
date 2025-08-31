@@ -40,22 +40,15 @@ pub async fn summarize_with_ollama(
 ) -> Result<(String, usize, usize)> {
     let url = format!("{}/api/chat", base.trim_end_matches('/'));
 
-    const SYSTEM: &str = "You are summarizing ONE forum thread excerpt.\nReturn a concise summary in plain text:\n- First line: a brief headline.\n- Subsequent lines: '- ' bullet points with key facts.\nDo NOT include post IDs, timestamps, author names, or URLs.";
-
+    /* Note: System prompt is set in the Modelfile */
     let body = ChatReq {
         model,
         stream: false,
         keep_alive: Some("5m"),
-        messages: vec![
-            Msg {
-                role: "system",
-                content: SYSTEM,
-            },
-            Msg {
-                role: "user",
-                content: prompt,
-            },
-        ],
+        messages: vec![Msg {
+            role: "user",
+            content: prompt,
+        }],
     };
 
     let in_tok: usize = body
