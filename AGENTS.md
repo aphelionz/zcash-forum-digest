@@ -69,7 +69,7 @@ graph TD
 **Logic:** HTML parsed via `html5ever` with entity decoding and `script/style` removal;
 whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
-**Limits:** ≤ 1.8k chars (char‑safe truncation). Posts before the 24‑hour cutoff are summarized for context, and posts within the last 24 hours are summarized separately for the digest.
+**Limits:** ≤ 1.8k chars (char‑safe truncation). Only posts within the last 24 hours are considered; older posts are ignored.
 
 ## 3) Summarizer (Local LLM)
 
@@ -153,7 +153,7 @@ Consider per‑provider allowlist if you later add remote LLMs.
 
 **Purpose:** Publish an HTML and RSS digest of forum topics updated in the last 24 hours.
 
-**Runtime:** The binary fetches recent topics, summarizes context (posts older than 24 hours) and recent posts, then writes `public/index.html` and `public/rss.xml`.
+**Runtime:** The binary fetches recent topics, summarizes posts from the last 24 hours only, then writes `public/index.html` and `public/rss.xml` with bullet-listed summaries.
 
 **Workflow:** `.github/workflows/digest.yml` installs and starts Ollama, builds the `zc-forum-summarizer` model from `Modelfile`, runs the digest generator, and deploys the output to GitHub Pages on a daily schedule or manual trigger.
 
