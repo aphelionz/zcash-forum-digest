@@ -32,6 +32,10 @@ ollama-start:
 ollama-stop:
   @pkill -f "ollama serve" || true
 
+ollama-rebuild:
+  @ollama rm zc-forum-summarizer || true
+  @ollama create zc-forum-summarizer
+
 # --- Documentation tasks ---
 grip-start:
   @grip --quiet . &
@@ -41,11 +45,14 @@ grip-stop:
 
 # --- Composite tasks ---
 cov:
-        cargo llvm-cov clean --workspace
-        cargo llvm-cov --all-features --workspace --lcov --output-path target/lcov.info
+  cargo llvm-cov clean --workspace
+  cargo llvm-cov --all-features --workspace --lcov --output-path target/lcov.info
 
-startup:
+startup: ollama-start grip-start
   @echo "Startup complete"
 
 teardown: ollama-stop grip-stop
   @echo "Teardown complete"
+
+reset: teardown startup
+  @echo "Reset complete"
