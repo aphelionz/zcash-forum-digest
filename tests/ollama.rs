@@ -40,13 +40,7 @@ async fn summarize_ollama_client_error_is_permanent() {
         .await;
     let client = Client::new();
     let prompt = "Thread: test\n\nContent excerpt:\n---\nHello world\n---";
-    unsafe {
-        std::env::set_var("OLLAMA_MAX_ELAPSED_SECS", "1");
-    }
     let res = summarize_with_ollama(&client, &server.uri(), "test-model", prompt).await;
-    unsafe {
-        std::env::remove_var("OLLAMA_MAX_ELAPSED_SECS");
-    }
     assert!(res.is_err());
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
