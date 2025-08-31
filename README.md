@@ -1,6 +1,6 @@
 # Zcash Forum Digest _(zc-forum-etl)_
 
-Local-first ETL and summarization pipeline for the Zcash Community Forum. It also generates a daily HTML and RSS digest of recent topics for publishing via GitHub Pages.
+Summarization pipeline for the Zcash Community Forum. It fetches forum threads, summarizes them with a local LLM, and generates a daily HTML and RSS digest.
 
 ## Table of Contents
 - [Background](#background)
@@ -16,14 +16,12 @@ Local-first ETL and summarization pipeline for the Zcash Community Forum. It als
 
 ## Background
 This project pulls discussions from the public [Zcash Community Forum](https://forum.zcashcommunity.com/),
-stores them in Postgres, and produces concise topic summaries using a local
-LLM (Ollama + Qwen). A small CLI surfaces the latest or searched summaries
-for quick review.
+summarizes them in memory using a local LLM (Ollama + Qwen), and writes the
+results to HTML and RSS outputs.
 
 ## Install
 ### Dependencies
 - Rust 1.89+
-- Postgres
 - [Ollama](https://ollama.com/)
 - [just](https://github.com/casey/just) and [Nix](https://nixos.org/) for the dev shell (optional)
 
@@ -36,30 +34,14 @@ $ cd zcash-forum-digest
 # Enter Nix dev shell (optional but recommended)
 $ nix develop
 
-# Set up database
-$ just db-create
-
 # Build the local model with the provided Modelfile
 $ ollama create zc-forum-summarizer -f Modelfile
 ```
 
 ## Usage
-Run the ETL and summarization pipeline:
+Generate the digest:
 ```sh
-$ cargo run --bin zc-forum-etl
-```
-
-### CLI
-Inspect stored summaries from the terminal:
-```sh
-# Show the latest 5 summaries
-$ cargo run --bin show latest 5
-
-# Fetch a specific topic by ID
-$ cargo run --bin show id 1234
-
-# Search summaries by keyword
-$ cargo run --bin show search "zcash" 5
+$ cargo run --release
 ```
 
 ## Architecture
@@ -71,33 +53,17 @@ graph TD
 
   subgraph Rust_App["Rust App"]
     F[Fetcher\\nreqwest + tokio]
-    U[Upserter\\nsqlx]
-    G[Change Guard\\nLast LLM Check]
     B[Text Prep\\nHTML→text, chunk ≤ 1.8k]
     S[Summarizer\\nOllama /api/chat]
-  end
-
-  subgraph Postgres
-    TBL1[(topics)]
-    TBL2[(posts)]
-    TBL3[(topic_summaries_llm)]
+    O[Outputs\\nHTML & RSS]
   end
 
   subgraph Local_Tools["Local Tools"]
-    CLI[show CLI]
     JUST[Justfile helpers]
     NIX[Nix dev shell]
   end
 
-  DZC -->|latest topics| F -->|topic pages| U
-  U -->|upsert| TBL1
-  U -->|upsert| TBL2
-  TBL2 --> G
-  G -->|changed?| B
-  B -->|prompt| S -->|JSON summary| TBL3
-  CLI -->|read prefer LLM| TBL3
-  CLI -->|fallback| TBL1
-  CLI -->|fallback| TBL2
+  DZC -->|latest topics| F -->|topic pages| B -->|prompt| S -->|summary| O
 
   subgraph Observability
     TR[tracing logs]
@@ -112,13 +78,10 @@ is normalized.
 
 ## Configuration
 Environment variables:
-- `DATABASE_URL`: Postgres connection string
 - `LLM_MODEL`: Ollama model tag (default: `qwen2.5:latest`. For tuned prompts, it is recommended to build and use `zc-forum-summarizer` from the provided `Modelfile`.)
 - `OLLAMA_BASE_URL`: base URL for the Ollama API (default `http://127.0.0.1:11434`)
 
 The ETL processes topics sequentially to avoid timeouts on GitHub Actions.
-Adjust `TOPIC_CONCURRENCY` in `src/main.rs` if you need more parallelism locally.
-
 The `Modelfile` embeds the system prompt and default runtime parameters. Adjust it to tweak
 `temperature`, `num_ctx`, or other options and recreate the model. Requests send only the
 thread excerpt; formatting rules live in the model.
