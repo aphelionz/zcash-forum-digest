@@ -6,7 +6,7 @@ use tiktoken_rs::{CoreBPE, cl100k_base};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub mod ollama;
-pub use ollama::{Summary, summarize_with_ollama};
+pub use ollama::summarize_with_ollama;
 
 pub static BPE: LazyLock<CoreBPE> =
     LazyLock::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
@@ -127,6 +127,7 @@ pub struct Post {
     pub cooked: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    pub username: String,
 }
 
 pub fn posts_to_chunk<'a>(posts: impl Iterator<Item = &'a Post>, max_chars: usize) -> String {
@@ -153,6 +154,73 @@ pub fn posts_to_chunk<'a>(posts: impl Iterator<Item = &'a Post>, max_chars: usiz
         }
     }
     out
+}
+
+#[derive(Clone)]
+pub struct DigestItem {
+    pub post_id: u64,
+    pub topic_id: u64,
+    pub created_at: OffsetDateTime,
+    pub author: String,
+    pub title: String,
+    pub url: String,
+    pub summary: String,
+}
+
+pub fn build_post_url(base: &str, topic_id: u64, post_id: u64) -> String {
+    format!("{}/t/{}/{}", base.trim_end_matches('/'), topic_id, post_id)
+}
+
+pub fn compose_digest_item(
+    base: &str,
+    topic_id: u64,
+    title: &str,
+    post: &Post,
+    summary: String,
+) -> DigestItem {
+    DigestItem {
+        post_id: post.id,
+        topic_id,
+        created_at: post.created_at,
+        author: post.username.clone(),
+        title: title.to_string(),
+        url: build_post_url(base, topic_id, post.id),
+        summary,
+    }
+}
+
+/// Remove any `[post:ID]` annotations the model might echo from the prompt.
+///
+/// The model is instructed not to emit these tags, but this function provides a
+/// final safeguard by stripping them from the summary while preserving
+/// newlines.
+pub fn strip_post_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut temp = chars.clone();
+            if temp.next() == Some('p')
+                && temp.next() == Some('o')
+                && temp.next() == Some('s')
+                && temp.next() == Some('t')
+                && temp.next() == Some(':')
+            {
+                // Skip until closing bracket
+                for c2 in chars.by_ref() {
+                    if c2 == ']' {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out.lines()
+        .map(|l| squeeze_ws(l).trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

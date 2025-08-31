@@ -15,11 +15,13 @@ fn posts_to_chunk_counts_chars() {
             id: 1,
             cooked: "<p>é</p>".to_string(),
             created_at: ts,
+            username: "alice".to_string(),
         },
         Post {
             id: 2,
             cooked: "<p>😀</p>".to_string(),
             created_at: ts,
+            username: "bob".to_string(),
         },
     ];
     let ts_str = ts.format(&Rfc3339).unwrap();

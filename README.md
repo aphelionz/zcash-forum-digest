@@ -94,6 +94,28 @@ $ cargo clippy --all-features --lib -- -D warnings
 $ cargo nextest run --all-features --lib
 ```
 
+## Design rule
+
+The LLM is used **only** to summarize post content. All metadata—IDs,
+timestamps, authors, and titles—comes directly from the forum API and passes
+through unchanged. Links are built from topic and post IDs via the
+`build_post_url` helper. Any `[post:ID]` tags used in prompts are stripped from
+the final summaries.
+
+Example item:
+
+```json
+{
+  "post_id": 10,
+  "topic_id": 42,
+  "created_at": "2024-01-01T00:00:00Z",
+  "author": "carol",
+  "title": "Example Topic",
+  "url": "https://forum.zcashcommunity.com/t/42/10",
+  "summary": "Headline\n- key fact"
+}
+```
+
 ## Maintainers
 - Mark Henderson <henderson.mark@gmail.com>
 
