@@ -112,7 +112,7 @@ Example item:
   "author": "carol",
   "title": "Example Topic",
   "url": "https://forum.zcashcommunity.com/t/42/10",
-  "summary": "Headline\n- key fact"
+  "summary": "- bulleted list of key facts"
 }
 ```
 

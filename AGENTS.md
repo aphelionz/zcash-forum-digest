@@ -84,7 +84,7 @@ whitespace squeeze; label lines as `[post:<id> @ <iso8601>]`.
 
 * System: embedded in `Modelfile` or sent at runtime — technical note‑taker returning plain text.
 * User: thread title + excerpt with `[post:<id> @ <ts>]` lines.
-* Output: headline + `- ` bullets as plain text. Any `[post:ID]` markers are stripped before rendering.
+* Output: `- ` bullets as plain text. Any `[post:ID]` markers are stripped before rendering.
 
 **Backoff/Timeout:** transport + parse errors are transient; 120s max elapsed.
 
