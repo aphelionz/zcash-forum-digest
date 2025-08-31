@@ -89,8 +89,8 @@ async fn main() -> Result<()> {
     let cutoff = OffsetDateTime::now_utc() - Duration::hours(24);
 
     for stub in latest.topic_list.topics {
-        let posts = fetch_posts(&client, stub.id).await?;
-        if posts.iter().all(|p| p.created_at < cutoff) {
+        let posts = fetch_posts(&client, stub.id, cutoff).await?;
+        if posts.is_empty() {
             continue;
         }
         let last_post = posts
@@ -99,12 +99,12 @@ async fn main() -> Result<()> {
             .max()
             .unwrap_or_else(OffsetDateTime::now_utc);
 
-        let context_lines = posts_to_lines(posts.iter().filter(|p| p.created_at < cutoff));
-        let recent_lines = posts_to_lines(posts.iter().filter(|p| p.created_at >= cutoff));
+        let lines = posts_to_lines(posts.iter());
 
-        let mut context_text = String::new();
-        if !context_lines.is_empty() {
-            let chunk = make_chunk(&context_lines, CHUNK_MAX_CHARS);
+        let mut recent_html = String::new();
+        let mut desc = String::new();
+        if !lines.is_empty() {
+            let chunk = make_chunk(&lines, CHUNK_MAX_CHARS);
             if !chunk.is_empty() {
                 let prompt = build_prompt(&stub.title, &chunk);
                 match timeout(
@@ -114,47 +114,18 @@ async fn main() -> Result<()> {
                 .await
                 {
                     Ok(Ok((summary, _, _))) => {
-                        context_text = summary_to_text(&summary);
+                        recent_html = summary_to_html(&summary);
+                        desc = summary_to_text(&summary);
                     }
-                    Ok(Err(e)) => warn!("LLM summarize failed for {} (context): {e}", stub.id),
-                    Err(_) => warn!("LLM summarize timed out for {} (context)", stub.id),
-                }
-            }
-        }
-
-        let mut recent_text = String::new();
-        if !recent_lines.is_empty() {
-            let chunk = make_chunk(&recent_lines, CHUNK_MAX_CHARS);
-            if !chunk.is_empty() {
-                let prompt = build_prompt(&stub.title, &chunk);
-                match timeout(
-                    StdDuration::from_secs(SUM_TIMEOUT_SECS),
-                    summarize_with_ollama(&client, &ollama_base, &model, &prompt),
-                )
-                .await
-                {
-                    Ok(Ok((summary, _, _))) => {
-                        recent_text = summary_to_text(&summary);
-                    }
-                    Ok(Err(e)) => warn!("LLM summarize failed for {} (recent): {e}", stub.id),
-                    Err(_) => warn!("LLM summarize timed out for {} (recent)", stub.id),
+                    Ok(Err(e)) => warn!("LLM summarize failed for {}: {e}", stub.id),
+                    Err(_) => warn!("LLM summarize timed out for {}", stub.id),
                 }
             }
         }
 
         html.push_str(&format!("<h2>{}</h2>", stub.title));
-        let mut desc = String::new();
-        if !context_text.is_empty() {
-            html.push_str(&format!("<p>{}</p>", context_text));
-            desc.push_str(&context_text);
-        }
-        if !recent_text.is_empty() {
-            html.push_str("<h3>Last 24h</h3>");
-            html.push_str(&format!("<p>{}</p>", recent_text));
-            if !desc.is_empty() {
-                desc.push(' ');
-            }
-            desc.push_str(&recent_text);
+        if !recent_html.is_empty() {
+            html.push_str(&recent_html);
         }
 
         let pub_date = last_post.format(&Rfc2822)?;
@@ -184,15 +155,34 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn summary_to_text(s: &Summary) -> String {
-    let mut ctx = s.headline.clone();
-    if !s.bullets.is_empty() {
-        if !ctx.is_empty() {
-            ctx.push(' ');
-        }
-        ctx.push_str(&s.bullets.join(" "));
+fn summary_to_html(s: &Summary) -> String {
+    let mut out = String::new();
+    if !s.headline.is_empty() {
+        out.push_str(&format!("<p>{}</p>", s.headline));
     }
-    ctx
+    if !s.bullets.is_empty() {
+        out.push_str("<ul>");
+        for b in &s.bullets {
+            out.push_str(&format!("<li>{}</li>", b));
+        }
+        out.push_str("</ul>");
+    }
+    out
+}
+
+fn summary_to_text(s: &Summary) -> String {
+    let mut out = String::new();
+    if !s.headline.is_empty() {
+        out.push_str(&s.headline);
+    }
+    for b in &s.bullets {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("- ");
+        out.push_str(b);
+    }
+    out
 }
 
 async fn fetch_latest(client: &Client) -> Result<Latest> {
@@ -223,7 +213,7 @@ async fn fetch_topic_page(client: &Client, id: u64, page: u32) -> Result<TopicFu
         .await?)
 }
 
-async fn fetch_posts(client: &Client, id: u64) -> Result<Vec<Post>> {
+async fn fetch_posts(client: &Client, id: u64, cutoff: OffsetDateTime) -> Result<Vec<Post>> {
     let mut all = Vec::new();
     let mut page = 0;
     loop {
@@ -233,7 +223,12 @@ async fn fetch_posts(client: &Client, id: u64) -> Result<Vec<Post>> {
                 if count == 0 {
                     break;
                 }
-                all.extend(tf.post_stream.posts);
+                all.extend(
+                    tf.post_stream
+                        .posts
+                        .into_iter()
+                        .filter(|p| p.created_at >= cutoff),
+                );
                 if count < PAGE_SIZE {
                     break;
                 }
