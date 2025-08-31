@@ -44,22 +44,6 @@ cov:
         cargo llvm-cov clean --workspace
         cargo llvm-cov --all-features --workspace --lcov --output-path target/lcov.info
 
-# --- Ollama lifecycle ---
-
-ollama-start:
-  ollama serve &
-
-ollama-stop:
-  @pkill -f "ollama serve" || true
-
-# --- Documentation tasks ---
-grip-start:
-  @grip --quiet . &
-
-grip-stop:
-  @pkill -f "grip" || true
-
-# --- Composite tasks ---
 startup: ollama-start grip-start
   @echo "Startup complete"
 
