@@ -11,6 +11,50 @@ pub use ollama::summarize_with_ollama;
 pub static BPE: LazyLock<CoreBPE> =
     LazyLock::new(|| cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
 
+// Sorted list of HTML block-level tags that should be separated by whitespace
+// when converting to plain text.
+const BLOCK_TAGS: [&str; 39] = [
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "br",
+    "canvas",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "noscript",
+    "ol",
+    "output",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "td",
+    "tfoot",
+    "th",
+    "tr",
+    "ul",
+    "video",
+];
+
 /// Strip HTML tags, decode entities, and drop script/style blocks.
 pub fn strip_tags_fast(html: &str) -> String {
     // Fast path: skip DOM parse if there are no tags or entities.
@@ -31,48 +75,7 @@ pub fn strip_tags_fast(html: &str) -> String {
                     return;
                 }
                 // After processing children, add a space if this is a block-level element.
-                let is_block = matches!(
-                    local,
-                    "address"
-                        | "article"
-                        | "aside"
-                        | "blockquote"
-                        | "canvas"
-                        | "dd"
-                        | "div"
-                        | "dl"
-                        | "dt"
-                        | "fieldset"
-                        | "figcaption"
-                        | "figure"
-                        | "footer"
-                        | "form"
-                        | "h1"
-                        | "h2"
-                        | "h3"
-                        | "h4"
-                        | "h5"
-                        | "h6"
-                        | "header"
-                        | "hr"
-                        | "li"
-                        | "main"
-                        | "nav"
-                        | "noscript"
-                        | "ol"
-                        | "output"
-                        | "p"
-                        | "pre"
-                        | "section"
-                        | "table"
-                        | "tfoot"
-                        | "ul"
-                        | "video"
-                        | "tr"
-                        | "td"
-                        | "th"
-                        | "br"
-                );
+                let is_block = BLOCK_TAGS.binary_search(&local).is_ok();
                 for child in handle.children.borrow().iter() {
                     walk(child, out);
                 }
