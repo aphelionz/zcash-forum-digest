@@ -6,7 +6,6 @@ Summarization pipeline for the Zcash Community Forum. It fetches forum threads, 
 - [Background](#background)
 - [Install](#install)
 - [Usage](#usage)
-  - [CLI](#cli)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Development](#development)
