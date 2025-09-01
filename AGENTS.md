@@ -13,10 +13,10 @@ graph TD
   end
 
   subgraph Rust_App["Rust App"]
-    F[Fetcher\\nreqwest + tokio]
-    B[Text Prep\\nHTML→text, chunk ≤ 1.8k]
-    S[Summarizer\\nOllama /api/chat]
-    O[Outputs\\nHTML & RSS]
+    F[Fetcher<br />reqwest + tokio]
+    B[Text Prep<br />HTML→text, chunk ≤ 1.8k]
+    S[Summarizer<br />Ollama /api/chat]
+    O[Outputs<br />HTML & RSS]
   end
 
   subgraph Local_Tools["Local Tools"]
