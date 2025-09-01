@@ -75,7 +75,8 @@ pub fn strip_tags_fast(html: &str) -> String {
                     return;
                 }
                 // After processing children, add a space if this is a block-level element.
-                let is_block = BLOCK_TAGS.binary_search(&local).is_ok();
+                let local_lower = local.to_ascii_lowercase();
+                let is_block = BLOCK_TAGS.binary_search(&local_lower.as_str()).is_ok();
                 for child in handle.children.borrow().iter() {
                     walk(child, out);
                 }
