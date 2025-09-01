@@ -9,7 +9,7 @@ Note to coding agents: Please always remember to update this doc when making cha
 ```mermaid
 graph TD
   subgraph Discourse
-    DZC["Zcash Forum API\\n/latest.json & /t/{id}.json"]
+    DZC["Zcash Forum API<br />/latest.json & /t/{id}.json"]
   end
 
   subgraph Rust_App["Rust App"]
