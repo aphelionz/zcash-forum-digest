@@ -9,14 +9,14 @@ Note to coding agents: Please always remember to update this doc when making cha
 ```mermaid
 graph TD
   subgraph Discourse
-    DZC["Zcash Forum API\\n/latest.json & /t/{id}.json"]
+    DZC["Zcash Forum API<br />/latest.json & /t/{id}.json"]
   end
 
   subgraph Rust_App["Rust App"]
-    F[Fetcher\\nreqwest + tokio]
-    B[Text Prep\\nHTML→text, chunk ≤ 1.8k]
-    S[Summarizer\\nOllama /api/chat]
-    O[Outputs\\nHTML & RSS]
+    F[Fetcher<br />reqwest + tokio]
+    B[Text Prep<br />HTML→text, chunk ≤ 1.8k]
+    S[Summarizer<br />Ollama /api/chat]
+    O[Outputs<br />HTML & RSS]
   end
 
   subgraph Local_Tools["Local Tools"]
