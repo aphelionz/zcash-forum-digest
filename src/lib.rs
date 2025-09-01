@@ -14,7 +14,7 @@ pub static BPE: LazyLock<CoreBPE> =
 /// Strip HTML tags, decode entities, and drop script/style blocks.
 pub fn strip_tags_fast(html: &str) -> String {
     // Fast path: skip DOM parse if there are no tags or entities.
-    if !html.contains('<') && !html.contains('&') {
+    if html.as_bytes().iter().any(|b| *b == b'<' || *b == b'&') == false {
         return squeeze_ws(html.trim());
     }
     let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(html);
