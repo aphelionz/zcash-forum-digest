@@ -200,10 +200,10 @@ async fn fetch_posts(client: &Client, id: u64, cutoff: OffsetDateTime) -> Result
                 sleep(StdDuration::from_secs(1)).await;
             }
             Err(e) => {
-                if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
-                    if req_err.status() == Some(StatusCode::NOT_FOUND) {
-                        break;
-                    }
+                if let Some(req_err) = e.downcast_ref::<reqwest::Error>()
+                    && req_err.status() == Some(StatusCode::NOT_FOUND)
+                {
+                    break;
                 }
                 return Err(e);
             }
